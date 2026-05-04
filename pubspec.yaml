@@ -1,0 +1,48 @@
+name: docsign
+description: DocSign — Annotate, sign, scan and edit documents. 100% offline.
+publish_to: 'none'
+version: 1.0.0+2
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  pdfrx: ^1.2.8
+  pdf: ^3.11.1
+  printing: ^5.13.2
+  image: ^4.2.0
+  crop_your_image: ^1.1.0
+  path_provider: ^2.1.4
+  path: ^1.9.0
+  file_picker: ^8.1.2
+  shared_preferences: ^2.3.2
+  crypto: ^3.0.3
+  share_plus: ^10.0.0
+  signature: ^5.4.0
+  image_picker: ^1.1.2
+  google_fonts: ^6.2.1
+  archive: ^3.6.1
+  flutter_colorpicker: ^1.1.0
+  uuid: ^4.5.1
+  url_launcher: ^6.3.1
+  http: ^1.2.0
+  flutter_quill: ^10.8.5
+  qr_flutter: ^4.1.0
+  
+dependency_overrides:
+  intl: '0.19.0'
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.0
+
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+    - assets/icons/logo.png
+    - assets/fonts/NotoSans-Regular.ttf
+    - assets/fonts/NotoSans-Bold.ttf
