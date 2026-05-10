@@ -92,12 +92,22 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
     setState(() { _loading = true; _failed = false; });
     await _renderSem.acquire();
     try {
-      final page = widget.document.pages[widget.pageIndex];
-      _aspect = page.width / page.height;
-
       final dpr = ui.PlatformDispatcher.instance.views.first.devicePixelRatio;
-      final physW = (widget.displayWidth * dpr.clamp(0.5, 2.0)).clamp(300.0, _maxRenderWidth);
-      final physH = (physW / _aspect).clamp(200.0, _maxRenderWidth * 2);
+
+      // Keep your existing max width safety but REMOVE blur-causing clamp
+      final safeDpr = dpr < 1.0 ? 1.0 : dpr;
+
+      // Render at higher quality multiplier (key fix)
+      const renderScale = 2.5;
+
+      // Use PDF intrinsic page size instead of widget width (major improvement)
+      final page = widget.document.pages[widget.pageIndex];
+
+      final physW = (page.width * renderScale * safeDpr)
+          .clamp(800.0, _maxRenderWidth);
+
+      final physH = (page.height * renderScale * safeDpr)
+          .clamp(800.0, _maxRenderWidth * 2);
 
       final pdfImage = await page.render(
           fullWidth: physW, fullHeight: physH, backgroundColor: Colors.white);
@@ -361,11 +371,20 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
               style: FilledButton.styleFrom(backgroundColor: DS.indigo.withOpacity(0.7), visualDensity: VisualDensity.compact))])));
     if (_pageBytes == null) return Container(color: Colors.white);
     
-    // ✅ Use InteractiveViewer here for natural zoom feel
+    //  Use InteractiveViewer here for natural zoom feel
     return InteractiveViewer(
       minScale: 1.0,
-      maxScale: 5.0,
-      child: Image.memory(_pageBytes!, fit: BoxFit.contain, gaplessPlayback: true),
+      maxScale: 6.0,
+      panEnabled: true,
+      scaleEnabled: true,
+      child: RepaintBoundary(
+        child: Image.memory(
+          _pageBytes!,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.high,
+        ),
+      ),
     );
   }
 

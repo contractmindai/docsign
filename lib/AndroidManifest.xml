@@ -1,10 +1,44 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Permissions -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
 
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29"/>
+
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+
+    <uses-permission android:name="android.permission.READ_MEDIA_DOCUMENTS"/>
+
     <uses-permission android:name="android.permission.CAMERA"/>
+
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Required for Android 11+ file opening -->
+    <queries>
+
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <category android:name="android.intent.category.DEFAULT"/>
+            <data android:mimeType="application/pdf"/>
+        </intent>
+
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:mimeType="image/*"/>
+        </intent>
+
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:mimeType="application/msword"/>
+        </intent>
+
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"/>
+        </intent>
+
+    </queries>
 
     <application
         android:label="DocSign"

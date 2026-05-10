@@ -22,3 +22,7 @@ subprojects {
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
+
+configurations.all {
+    exclude(group = "com.crazecoder.openfile", module = "open_file_android")
+}
