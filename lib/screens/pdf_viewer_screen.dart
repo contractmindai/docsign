@@ -5,13 +5,14 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path/path.dart' as p;
 import 'package:printing/printing.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
-import 'package:http/http.dart' as http;
 
 import '../models/annotation.dart';
 import '../models/signer_profile.dart';
@@ -27,7 +28,6 @@ import '../widgets/audit_trail_widget.dart';
 import '../widgets/ds.dart';
 import '../widgets/pdf_page_widget.dart';
 import '../widgets/pro_panels.dart';
-import '../widgets/search_panel.dart';
 import '../widgets/signature_dialog.dart';
 import '../widgets/signer_profile_dialog.dart';
 import '../widgets/thumbnail_strip.dart';
@@ -77,19 +77,31 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   List<ExpiryDate> _expiries = [];
   bool _showExpiryBanner = false;
   bool _darkMode = false;
-  bool _showSearch = false;
   bool _showThumbs = true;
   bool _isSaving = false;
   bool _readMode = true;
-  bool _isSaved = true;  // ✅ Save status indicator
-
-  double _defaultZoom = 1.0;
+  bool _isSaved = true;
 
   DateTime? _lastMutation;
   final _uuid = const Uuid();
 
+  final TransformationController _transformationController = TransformationController();
+
   bool get _annotating => _tool != AnnotationTool.view || _pendingSig != null;
   Uint8List? get _sourceBytes => widget.preloadedBytes ?? PlatformFileService.getCached(widget.filePath);
+
+  // ----------------------------------------------------------------------
+  // Device fingerprint (persistent, offline)
+  // ----------------------------------------------------------------------
+  Future<String> _getDeviceFingerprint() async {
+    final prefs = await SharedPreferences.getInstance();
+    const key = 'device_fingerprint';
+    final existing = prefs.getString(key);
+    if (existing != null) return existing;
+    final newFp = const Uuid().v4();
+    await prefs.setString(key, newFp);
+    return newFp;
+  }
 
   @override
   void initState() {
@@ -97,25 +109,20 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     _openDoc();
     _loadProfile();
     _scroll.addListener(_trackPage);
+    // Hide thumbnails on mobile
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (MediaQuery.of(context).size.width < 600 && _showThumbs) {
+        setState(() => _showThumbs = false);
+      }
+    });
   }
 
   @override
   void dispose() {
     _autosaveNow();
     _scroll.dispose();
+    _transformationController.dispose();
     super.dispose();
-  }
-
-  Future<String?> _getIpAddress() async {
-    try {
-      final uri = Uri.parse('https://api.ipify.org?format=json');
-      final response = await http.get(uri);
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['ip'] as String?;
-      }
-    } catch (_) {}
-    return null;
   }
 
   Future<void> _openDoc({String? password}) async {
@@ -127,7 +134,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
       _detectExpiry();
     } catch (e) {
       final msg = e.toString().toLowerCase();
-      if (msg.contains('password') || msg.contains('encrypted') || msg.contains('unknown') || msg.contains('w1.d')) {
+      if (msg.contains('password') || msg.contains('encrypted') || msg.contains('unknown')) {
         if (mounted) { setState(() => _docLoading = false); _showPasswordDialog(); }
       } else {
         if (mounted) setState(() { _docLoading = false; _docError = e.toString(); });
@@ -151,14 +158,48 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   void _trackPage() {
     if (!_scroll.hasClients || !mounted) return;
     final sw = MediaQuery.of(context).size.width;
-    final ph = sw / 1.414 + 12;
+    final ph = _getPageHeight(sw);
     final pg = (_scroll.offset / ph).floor() + 1;
     if (pg != _visPage && pg >= 1 && pg <= _pageCount) setState(() => _visPage = pg);
+  }
+
+  double _getPageHeight(double screenWidth) {
+    final isMobile = screenWidth < 600;
+    final sideW = (kIsWeb && screenWidth > 700 && _showThumbs) ? 88.0 : 0;
+    final usableWidth = screenWidth - sideW;
+    double widthFactor;
+    if (isMobile) widthFactor = 0.98;
+    else if (screenWidth < 1024) widthFactor = 0.92;
+    else widthFactor = 0.82;
+    double pageWidth = (usableWidth * widthFactor).clamp(280.0, 1200.0);
+    return pageWidth * 1.414 + 12;
   }
 
   void _toggleReadMode() {
     setState(() => _readMode = !_readMode);
     _snack(_readMode ? 'Read Mode — Scroll to navigate' : 'Zoom Mode — Pinch to zoom');
+  }
+
+  void _zoom(double factor) {
+    final matrix = _transformationController.value;
+    final center = Offset(
+      MediaQuery.of(context).size.width / 2,
+      MediaQuery.of(context).size.height / 2,
+    );
+    final newMatrix = Matrix4.identity()
+      ..translate(center.dx, center.dy)
+      ..scale(factor)
+      ..translate(-center.dx, -center.dy)
+      ..multiply(matrix);
+    _transformationController.value = newMatrix;
+    if (mounted) setState(() {});
+  }
+
+  void _zoomIn() => _zoom(1.2);
+  void _zoomOut() => _zoom(1 / 1.2);
+  void _resetZoom() {
+    _transformationController.value = Matrix4.identity();
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadSidecar() async {
@@ -175,7 +216,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
   void _markMutated() {
     _lastMutation = DateTime.now();
-    setState(() => _isSaved = false);  // ✅ Show unsaved
+    setState(() => _isSaved = false);
     Future.delayed(const Duration(seconds: 3), _autosaveNow);
   }
   Future<void> _autosaveNow() async {
@@ -186,7 +227,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
         pdfPath: widget.filePath, rects: _rects, ink: _ink,
         notes: _notes, stamps: _stamps, redactions: _redacts, bookmarks: _clauses,
         textEdits: _textEdits);
-      if (mounted) setState(() => _isSaved = true);  // ✅ Show saved
+      if (mounted) setState(() => _isSaved = true);
     } catch (_) {}
   }
   void _switchTab(_TabMode tab) { setState(() { _currentTab = tab; _tool = tab == _TabMode.edit ? AnnotationTool.textStamp : AnnotationTool.view; }); }
@@ -197,7 +238,27 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   void _addInk(int pg, InkStroke s) => _mutate(() { final ex = _ink[pg]; _ink[pg] = ex == null ? InkAnnotation(id: _uuid.v4(), pageIndex: pg, strokes: [s]) : ex.addStroke(s); _undoStack.add(() => setState(() { final c = _ink[pg]; if (c == null) return; if (c.strokes.length == 1) { _ink.remove(pg); return; } _ink[pg] = InkAnnotation(id: c.id, pageIndex: pg, strokes: c.strokes.sublist(0, c.strokes.length - 1)); })); });
   void _addNote(StickyNote n) => _mutate(() { _notes.putIfAbsent(n.pageIndex, () => []).add(n); _undoStack.add(() => setState(() => _notes[n.pageIndex]?.removeWhere((x) => x.id == n.id))); });
   void _toggleNote(String id, bool e) => setState(() { for (final l in _notes.values) { for (final n in l) { if (n.id == id) n.isExpanded = e; } } });
-  void _placeSig(SignatureOverlay sig) async { final ip = await _getIpAddress(); final m = SignatureOverlay(id: sig.id, imageBytes: sig.imageBytes, pageIndex: sig.pageIndex, normPosition: sig.normPosition, normSize: sig.normSize, isInitials: sig.isInitials, slotId: _activeSlotId, signerName: _profile?.fullName); _mutate(() { _sigs.putIfAbsent(m.pageIndex, () => []).add(m); _pendingSig = null; _initialsMode = false; _tool = AnnotationTool.view; _undoStack.add(() => setState(() => _sigs[m.pageIndex]?.removeWhere((s) => s.id == m.id))); }); if (ip != null) _signatureIps[m.id] = ip; }
+  void _placeSig(SignatureOverlay sig) async {
+    final fp = await _getDeviceFingerprint();
+    final m = SignatureOverlay(
+      id: sig.id,
+      imageBytes: sig.imageBytes,
+      pageIndex: sig.pageIndex,
+      normPosition: sig.normPosition,
+      normSize: sig.normSize,
+      isInitials: sig.isInitials,
+      slotId: _activeSlotId,
+      signerName: _profile?.fullName,
+    );
+    _mutate(() {
+      _sigs.putIfAbsent(m.pageIndex, () => []).add(m);
+      _pendingSig = null;
+      _initialsMode = false;
+      _tool = AnnotationTool.view;
+      _undoStack.add(() => setState(() => _sigs[m.pageIndex]?.removeWhere((s) => s.id == m.id)));
+    });
+    _signatureIps[m.id] = fp;
+  }
   void _moveSig(String id, Offset pos) => setState(() { for (final l in _sigs.values) { for (final s in l) { if (s.id == id) s.normPosition = pos; } } _markMutated(); });
   void _resizeSig(String id, Size sz) => setState(() { for (final l in _sigs.values) { for (final s in l) { if (s.id == id) s.normSize = sz; } } _markMutated(); });
   void _deleteSig(String id) => setState(() { for (final l in _sigs.values) l.removeWhere((s) => s.id == id); _signatureIps.remove(id); _markMutated(); });
@@ -212,53 +273,109 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
   Future<String?> _buildPdf() => PdfSaveService.save(sourcePath: widget.filePath, pageCount: _pageCount, rectAnnotations: _rects, inkAnnotations: _ink, stickyNotes: _notes, signatures: _sigs, textStamps: _stamps, redactions: _redacts, bookmarks: _clauses, textEdits: _textEdits, slots: _slots, signerProfile: _profile, signatureIps: _signatureIps, sourceBytes: _sourceBytes);
 
-  Future<void> _save() async { if (_isSaving) return; String? customDir; if (!kIsWeb) customDir = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Choose save location'); setState(() => _isSaving = true); try { final path = await _buildPdf(); if (path == null) throw Exception('Build failed'); if (customDir != null && !kIsWeb) { final dest = '$customDir/${p.basename(path)}'; final bytes = await PlatformFileService.readBytes(path); if (bytes != null) await PlatformFileService.writeBytes(dest, bytes); _snack('Saved to $customDir', duration: 4); } else if (kIsWeb) { final bytes = PlatformFileService.getCached(path); if (bytes != null) { downloadFile(p.basename(path), bytes); _snack('Downloaded ${p.basename(path)}'); } } else { _snack('Saved ${p.basename(path)}'); } } catch (e) { if (mounted) _snack('Save failed: $e', err: true); } finally { if (mounted) setState(() => _isSaving = false); } }
-  Future<void> _share() async { if (_isSaving) return; setState(() => _isSaving = true); try { final path = await _buildPdf(); if (path == null) throw Exception('Build failed'); if (kIsWeb) { final bytes = PlatformFileService.getCached(path); if (bytes != null) downloadFile(p.basename(path), bytes); } else { await Share.shareXFiles([XFile(path)], subject: p.basename(path)); } } catch (e) { if (mounted) _snack('Share failed: $e', err: true); } finally { if (mounted) setState(() => _isSaving = false); } }
-  Future<void> _print() async { try { final path = await _buildPdf(); if (path == null) return; final bytes = await PlatformFileService.readBytes(path) ?? Uint8List(0); await Printing.layoutPdf(onLayout: (_) async => bytes); } catch (e) { if (mounted) _snack('Print error: $e', err: true); } }
-
-  void _scrollToPage(int idx) { if (!_scroll.hasClients) return; final sw = MediaQuery.of(context).size.width - (kIsWeb && MediaQuery.of(context).size.width > 700 ? 200 : 0); final ph = sw / 1.414 + 12; _scroll.animateTo((idx * ph).clamp(0.0, _scroll.position.maxScrollExtent), duration: const Duration(milliseconds: 300), curve: Curves.easeInOut); }
-  void _snack(String msg, {bool err = false, int duration = 3}) { if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg, style: const TextStyle(color: Colors.white, fontSize: 13)), backgroundColor: err ? DS.red : DS.bgCard2, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), margin: const EdgeInsets.all(12), duration: Duration(seconds: duration))); }
-  
-  void _openTools() {
-    // ✅ Pass both bytes AND document
-    Navigator.push(context, MaterialPageRoute(
-      builder: (_) => PdfToolsScreen(
-        filePath: widget.filePath,
-        fileBytes: _sourceBytes,  // ✅ Pass the bytes!
-        document: _doc,           // ✅ Pass the document!
-      )));
-  }
-  // ✅ One-Click Email Signed PDF
-  Future<void> _emailSignedPdf() async {
-    if (_isSaving) return;
+  // ------------------ GUARDED SAVE/SHARE/EMAIL ------------------
+  Future<void> _save() async {
+    if (_isSaving || _docLoading || _doc == null) return;
+    String? customDir;
+    if (!kIsWeb) customDir = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Choose save location');
     setState(() => _isSaving = true);
-    
     try {
       final path = await _buildPdf();
       if (path == null) throw Exception('Build failed');
-      
-      final name = p.basenameWithoutExtension(widget.filePath);
-      final subject = 'Signed: $name';
-      final body = 'Please find the signed document attached.\n\n'
-                   'Signed via DocSign — Free PDF Tools\n'
-                   'https://pdf.contractmind.ai';
-      
-      if (kIsWeb) {
-        final uri = Uri(scheme: 'mailto', queryParameters: {
-          'subject': subject,
-          'body': '$body\n\n(Attach the downloaded PDF manually)',
-        });
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri);
-          _snack('Email client opened');
+      if (customDir != null && !kIsWeb) {
+        final dest = '$customDir/${p.basename(path)}';
+        final bytes = await PlatformFileService.readBytes(path);
+        if (bytes != null) await PlatformFileService.writeBytes(dest, bytes);
+        _snack('Saved to $customDir', duration: 4);
+      } else if (kIsWeb) {
+        final bytes = PlatformFileService.getCached(path);
+        if (bytes != null) {
+          downloadFile(p.basename(path), bytes);
+          _snack('Downloaded ${p.basename(path)}');
         }
       } else {
-        await Share.shareXFiles(
-          [XFile(path, mimeType: 'application/pdf')],
-          subject: subject,
-          text: body,
-        );
-        _snack('Choose Email to send');
+        _snack('Saved ${p.basename(path)}');
+      }
+    } catch (e) {
+      if (mounted) _snack('Save failed: $e', err: true);
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _share() async {
+    if (_isSaving || _docLoading || _doc == null) return;
+    setState(() => _isSaving = true);
+    try {
+      final path = await _buildPdf();
+      if (path == null) throw Exception('Build failed');
+      if (kIsWeb) {
+        final bytes = PlatformFileService.getCached(path);
+        if (bytes != null) downloadFile(p.basename(path), bytes);
+      } else {
+        await Share.shareXFiles([XFile(path)], subject: p.basename(path));
+      }
+    } catch (e) {
+      if (mounted) _snack('Share failed: $e', err: true);
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _print() async {
+    try {
+      final path = await _buildPdf();
+      if (path == null) return;
+      final bytes = await PlatformFileService.readBytes(path) ?? Uint8List(0);
+      await Printing.layoutPdf(onLayout: (_) async => bytes);
+    } catch (e) {
+      if (mounted) _snack('Print error: $e', err: true);
+    }
+  }
+
+  void _scrollToPage(int idx) {
+    if (!_scroll.hasClients) return;
+    final sw = MediaQuery.of(context).size.width;
+    final ph = _getPageHeight(sw);
+    _scroll.animateTo((idx * ph).clamp(0.0, _scroll.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+  }
+
+  void _snack(String msg, {bool err = false, int duration = 3}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, style: const TextStyle(color: Colors.white, fontSize: 13)),
+      backgroundColor: err ? DS.red : DS.bgCard2,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      margin: const EdgeInsets.all(12),
+      duration: Duration(seconds: duration),
+    ));
+  }
+  
+  void _openTools() {
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => PdfToolsScreen(
+        filePath: widget.filePath,
+        fileBytes: _sourceBytes,
+        document: _doc,
+      )));
+  }
+
+  Future<void> _emailSignedPdf() async {
+    if (_isSaving || _docLoading || _doc == null) return;
+    setState(() => _isSaving = true);
+    try {
+      final path = await _buildPdf();
+      if (path == null) throw Exception('Build failed');
+      final name = p.basenameWithoutExtension(widget.filePath);
+      final subject = 'Signed: $name';
+      final body = 'Please find the signed document attached.\n\nSigned via DocSign — Free PDF Tools\nhttps://pdf.contractmind.ai';
+      if (kIsWeb) {
+        final uri = Uri(scheme: 'mailto', queryParameters: {'subject': subject, 'body': '$body\n\n(Attach the downloaded PDF manually)'});
+        if (await canLaunchUrl(uri)) await launchUrl(uri);
+      } else {
+        await Share.shareXFiles([XFile(path, mimeType: 'application/pdf')], subject: subject, text: body);
       }
     } catch (e) {
       if (mounted) _snack('Email failed: $e', err: true);
@@ -266,106 +383,76 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
       if (mounted) setState(() => _isSaving = false);
     }
   }
-  bool get _isIOS {
-    return Theme.of(context).platform == TargetPlatform.iOS;
-  }
-  // ✅ Add method to calculate fit-width zoom
-  void _calculateFitZoom(double pageWidth, double displayWidth) {
-    if (displayWidth > 0 && pageWidth > 0) {
-      // Fit page width exactly, with 4% margin
-      _defaultZoom = (displayWidth / pageWidth) * 0.96;
-      _defaultZoom = _defaultZoom.clamp(0.8, 1.5); // Min 80%, Max 150%
-    }
-  }
 
-  @override
-  Widget build(BuildContext context) {
-    DS.setStatusBar();
-    final isWideWeb = kIsWeb && MediaQuery.of(context).size.width > 700;
+  bool get _isIOS => Theme.of(context).platform == TargetPlatform.iOS;
 
-    return Scaffold(
-      backgroundColor: _darkMode ? Colors.black : const Color(0xFFF0F0F0),
-      body: Column(children: [
-        SafeArea(bottom: false, child: Container(
-          height: 52, color: DS.bgCard,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Row(children: [
-            IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20), onPressed: () => Navigator.pop(context)),
-            Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text(p.basename(widget.filePath), style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white), overflow: TextOverflow.ellipsis, maxLines: 1),
-              if (_pageCount > 0) Text('p.$_visPage / $_pageCount', style: DS.caption().copyWith(fontSize: 10)),
-            ])),
-            IconButton(icon: Icon(_readMode ? Icons.menu_book_rounded : Icons.zoom_in_rounded, color: Colors.white54, size: 20), tooltip: _readMode ? 'Read Mode' : 'Zoom Mode', onPressed: _toggleReadMode),
-            if (_isSaving) const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: DS.indigo))) else IconButton(icon: const Icon(Icons.save_rounded, color: DS.indigo, size: 22), tooltip: kIsWeb ? 'Download' : 'Save', onPressed: _save),
-            IconButton(icon: Icon(kIsWeb ? Icons.download_rounded : Icons.ios_share_rounded, color: DS.indigo, size: 20), onPressed: _share),
-          ]),
-        )),
-        if (_showSearch && _doc != null) SearchPanel(pdfPath: widget.filePath, pageCount: _pageCount, onNavigate: (pg) { setState(() => _visPage = pg); _scrollToPage(pg-1); }, onClose: () => setState(() => _showSearch = false)),
-        if (_showExpiryBanner && _expiries.isNotEmpty) Container(color: const Color(0xFFB45309).withOpacity(0.9), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), child: Row(children: [const Icon(Icons.warning_amber_rounded, size: 12, color: Colors.amber), const SizedBox(width: 6), Expanded(child: Text(ExpiryDetector.urgencyLabel(_expiries.first), style: const TextStyle(color: Colors.white, fontSize: 11))), IconButton(icon: const Icon(Icons.close_rounded, size: 12, color: Colors.white54), onPressed: () => setState(() => _showExpiryBanner = false), visualDensity: VisualDensity.compact)])),
-        if (_pendingSig != null) Container(color: DS.indigo.withOpacity(0.15), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), child: Row(children: [const Icon(Icons.touch_app_rounded, color: DS.indigo, size: 14), const SizedBox(width: 6), Expanded(child: Text('Tap page to place ${_initialsMode ? "initials" : "signature"}', style: TextStyle(color: DS.indigo, fontSize: 12))), TextButton(onPressed: () => setState(() { _pendingSig = null; _tool = AnnotationTool.view; }), child: const Text('Cancel', style: TextStyle(fontSize: 11)))])),
-        Expanded(child: Row(children: [
-          if (isWideWeb && _showThumbs && _doc != null) Container(width: 88, color: DS.bgCard, child: _SidebarThumbs(doc: _doc!, pageCount: _pageCount, currentPage: _visPage, darkMode: _darkMode, annotationCounts: _annCounts, onPageSelected: (pg) { setState(() => _visPage = pg); _scrollToPage(pg - 1); })),
-          Expanded(child: _docLoading ? const Center(child: CircularProgressIndicator(color: DS.indigo)) : _docError != null ? _errorView() : _doc == null ? const SizedBox() : _pageList()),
-        ])),
-        if (!isWideWeb && _showThumbs && _doc != null) SizedBox(height: 80, child: ThumbnailStrip(document: _doc!, pageCount: _pageCount, currentPage: _visPage, darkMode: _darkMode, annotationCounts: _annCounts, onPageSelected: (pg) { setState(() => _visPage = pg); _scrollToPage(pg-1); })),
-        _BottomBar(
-          current: _currentTab, currentTool: _tool, isSaving: _isSaving, darkMode: _darkMode, showThumbs: _showThumbs, inkColor: _inkColor,
-          onTabChange: _switchTab, onToolChange: _onToolChanged, onColorChange: (c) => setState(() => _inkColor = c),
-          onUndo: _undo, onSave: _save, onShare: _share, onPrint: _print,
-          onSearch: () => setState(() => _showSearch = !_showSearch),
-          onDark: () => setState(() => _darkMode = !_darkMode),
-          onThumbs: () => setState(() => _showThumbs = !_showThumbs),
-          onProfile: () => SignerProfileDialog.show(context).then((_) => _loadProfile()),
-          onSlots: () => SignatureSlotsPanel.show(context: context, slots: _slots, activeSlotId: _activeSlotId, onChanged: (s, a) => setState(() { _slots = s; _activeSlotId = a; })),
-          onClauses: () => ClausePanel.show(context: context, bookmarks: _clauses, onNavigate: _scrollToPage, onDelete: (id) => setState(() { for (final l in _clauses.values) l.removeWhere((b) => b.id == id); })),
-          onSummary: () => AnnotationSummaryPanel.show(context: context, rects: _rects, ink: _ink, notes: _notes, sigs: _sigs, stamps: _stamps, redactions: _redacts, bookmarks: _clauses, onNavigate: (pg) { setState(() => _visPage = pg+1); _scrollToPage(pg); }),
-          onCompare: () => DocumentCompareScreen.show(context, widget.filePath),
-          onAudit: () => AuditTrailSheet.show(context: context, documentName: p.basename(widget.filePath), events: [AuditEvent.created(p.basename(widget.filePath)), ...(_sigs.values.expand((l) => l).map((s) => s.isInitials ? AuditEvent.initialled(s.signerName ?? 'Unknown', s.pageIndex+1) : AuditEvent.signed(s.signerName ?? 'Unknown', s.pageIndex+1)))]),
-          onTools: _openTools,
-        ),
-      ]),
-    );
-  }
-
-  Widget _errorView() => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.error_outline_rounded, color: DS.red, size: 44), const SizedBox(height: 10), Text('Cannot open file', style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)), const SizedBox(height: 6), Padding(padding: const EdgeInsets.symmetric(horizontal: 32), child: Text(_docError!, style: DS.caption(), textAlign: TextAlign.center)), const SizedBox(height: 16), FilledButton.icon(onPressed: () => _openDoc(), icon: const Icon(Icons.refresh_rounded, size: 16), label: const Text('Retry'), style: FilledButton.styleFrom(backgroundColor: DS.indigo))]));
-
+  // ----------------------------------------------------------------------
+  // RESPONSIVE PAGE LIST (dynamic width) - OPTIMIZED FOR 390+ PAGES
+  // ----------------------------------------------------------------------
   Widget _pageList() {
-    return ListView.builder(
-      controller: _scroll,
-      physics: _isIOS 
-          ? const BouncingScrollPhysics()  // ✅ iOS native feel
-          : (_annotating ? const NeverScrollableScrollPhysics() : const BouncingScrollPhysics()),
-      padding: EdgeInsets.symmetric(vertical: _isIOS ? 12 : 24),  // ✅ Tighter on iOS
-      itemCount: _pageCount,
-      itemBuilder: (_, i) {
-        final sw = MediaQuery.of(context).size.width;
-        final isWide = kIsWeb && sw > 700;
-        final isMobile = sw < 500;  // ✅ Works on both web and mobile
-        final maxW = isMobile ? sw : (isWide ? 900.0 : sw - 4);
-        final sideW = (isWide && _showThumbs) ? 88.0 : 0;
-        final availW = maxW - sideW;
-        
-        return Center(child: Container(
-          width: availW,
-          margin: EdgeInsets.only(bottom: _isIOS ? 8 : 16),  // ✅ Less gap on iOS
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(_isIOS ? 0 : 4),  // ✅ Full-width on iOS
-            boxShadow: _isIOS ? null : [  // ✅ No shadow on iOS (saves GPU)
-              BoxShadow(color: Colors.black.withOpacity(0.10), blurRadius: 10, offset: const Offset(0, 3)),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(_isIOS ? 0 : 4),
-            child: _readMode || _annotating
-                ? _buildPageWidget(i, availW)
-                : InteractiveViewer(
-                    minScale: 1.0,
-                    maxScale: 5.0,
-                    child: _buildPageWidget(i, availW),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenWidth = constraints.maxWidth;
+        final isMobile = screenWidth < 600;
+        final isTablet = screenWidth >= 600 && screenWidth < 1024;
+        final sideW = (kIsWeb && screenWidth > 700 && _showThumbs) ? 88.0 : 0;
+        final usableWidth = screenWidth - sideW;
+
+        double widthFactor;
+        if (isMobile) widthFactor = 0.98;
+        else if (isTablet) widthFactor = 0.92;
+        else widthFactor = 0.82;
+
+        double availW = (usableWidth * widthFactor).clamp(280.0, 1200.0);
+
+        return ListView.builder(
+          controller: _scroll,
+          // 🔥 PERFORMANCE: prevent keeping all pages in memory
+          addAutomaticKeepAlives: false,
+          // 🔥 PERFORMANCE: only pre-render ~2 screens ahead
+          cacheExtent: MediaQuery.of(context).size.height * 2,
+          physics: _isIOS
+              ? const BouncingScrollPhysics()
+              : (_annotating ? const NeverScrollableScrollPhysics() : const BouncingScrollPhysics()),
+          padding: EdgeInsets.symmetric(vertical: isMobile ? 4 : 12), // small padding on mobile
+          itemCount: _pageCount,
+          itemBuilder: (_, i) {
+            // 🔥 PERFORMANCE: isolate each page's repaint
+            return RepaintBoundary(
+              child: Center(
+                child: Container(
+                  width: availW,
+                  // 🔥 FIX: always show separation (margin + shadow)
+                  margin: EdgeInsets.only(bottom: isMobile ? 8 : 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(isMobile ? 4 : 8),
+                    // shadow on both mobile and desktop (lighter on mobile)
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(isMobile ? 0.04 : 0.08),
+                        blurRadius: isMobile ? 4 : 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
-          ),
-        ));
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(isMobile ? 4 : 8),
+                    child: _readMode || _annotating
+                        ? _buildPageWidget(i, availW)
+                        : InteractiveViewer(
+                            transformationController: _transformationController,
+                            minScale: 0.8,
+                            maxScale: 5.0,
+                            boundaryMargin: const EdgeInsets.all(20),
+                            child: _buildPageWidget(i, availW),
+                          ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
       },
     );
   }
@@ -381,8 +468,269 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
       onSignaturePlaced: _placeSig, onSignatureMoved: _moveSig, onSignatureResized: _resizeSig, onSignatureDeleted: _deleteSig,
       onTextStampAdded: _addStamp, onRedactionAdded: _addRedact, onBookmarkAdded: _addBookmark, onTextEditAdded: _addTextEdit);
   }
+
+  Widget _errorView() => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+    const Icon(Icons.error_outline_rounded, color: DS.red, size: 44),
+    const SizedBox(height: 10),
+    Text('Cannot open file', style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+    const SizedBox(height: 6),
+    Padding(padding: const EdgeInsets.symmetric(horizontal: 32), child: Text(_docError!, style: DS.caption(), textAlign: TextAlign.center)),
+    const SizedBox(height: 16),
+    FilledButton.icon(onPressed: () => _openDoc(), icon: const Icon(Icons.refresh_rounded, size: 16), label: const Text('Retry'), style: FilledButton.styleFrom(backgroundColor: DS.indigo)),
+  ]));
+
+  Widget _topBar() {
+    return SafeArea(
+      bottom: false,
+      child: Container(
+        height: 52,
+        color: DS.bgCard,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20),
+              onPressed: () => Navigator.pop(context),
+            ),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(p.basename(widget.filePath), style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white), overflow: TextOverflow.ellipsis, maxLines: 1),
+                  Text('p.$_visPage / $_pageCount', style: DS.caption().copyWith(fontSize: 10)),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: Icon(_readMode ? Icons.menu_book_rounded : Icons.zoom_in_rounded, color: Colors.white54, size: 20),
+              tooltip: _readMode ? 'Read Mode' : 'Zoom Mode',
+              onPressed: _toggleReadMode,
+            ),
+            if (_docLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Icon(Icons.save_rounded, color: Colors.white24, size: 22),
+              )
+            else if (_isSaving)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: DS.indigo)),
+              )
+            else
+              IconButton(
+                icon: const Icon(Icons.save_rounded, color: DS.indigo, size: 22),
+                tooltip: kIsWeb ? 'Download' : 'Save',
+                onPressed: _save,
+              ),
+            IconButton(icon: Icon(kIsWeb ? Icons.download_rounded : Icons.ios_share_rounded, color: DS.indigo, size: 20), onPressed: _share),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Floating zoom buttons (bottom‑right, no overlap with annotation bar)
+  Widget _floatingZoomButtons() {
+    if (_readMode || _annotating) return const SizedBox();
+    return Positioned(
+      bottom: 80,
+      right: 16,
+      child: Container(
+        decoration: BoxDecoration(
+          color: DS.bgCard,
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 12)],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _fabButton(Icons.zoom_out, _zoomOut),
+            _fabButton(Icons.zoom_in, _zoomIn),
+            _fabButton(Icons.aspect_ratio, _resetZoom),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _fabButton(IconData icon, VoidCallback onPressed) {
+    return Container(
+      margin: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: DS.bgCard2,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: IconButton(
+        icon: Icon(icon, color: DS.textPrimary),
+        onPressed: onPressed,
+        tooltip: '',
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    DS.setStatusBar();
+    final isWideWeb = kIsWeb && MediaQuery.of(context).size.width > 700;
+
+    return Scaffold(
+      backgroundColor: _darkMode ? Colors.black : const Color(0xFFF0F0F0),
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              _topBar(),
+              if (_showExpiryBanner && _expiries.isNotEmpty)
+                Container(
+                  color: const Color(0xFFB45309).withOpacity(0.9),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded, size: 12, color: Colors.amber),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(ExpiryDetector.urgencyLabel(_expiries.first), style: const TextStyle(color: Colors.white, fontSize: 11))),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 12, color: Colors.white54),
+                        onPressed: () => setState(() => _showExpiryBanner = false),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
+                  ),
+                ),
+              if (_pendingSig != null)
+                Container(
+                  color: DS.indigo.withOpacity(0.15),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.touch_app_rounded, color: DS.indigo, size: 14),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text('Tap page to place ${_initialsMode ? "initials" : "signature"}', style: TextStyle(color: DS.indigo, fontSize: 12))),
+                      TextButton(
+                        onPressed: () => setState(() { _pendingSig = null; _tool = AnnotationTool.view; }),
+                        child: const Text('Cancel', style: TextStyle(fontSize: 11)),
+                      ),
+                    ],
+                  ),
+                ),
+              Expanded(
+                child: Row(
+                  children: [
+                    if (isWideWeb && _showThumbs && _doc != null)
+                      Container(
+                        width: 88,
+                        color: DS.bgCard,
+                        child: _SidebarThumbs(
+                          doc: _doc!,
+                          pageCount: _pageCount,
+                          currentPage: _visPage,
+                          darkMode: _darkMode,
+                          annotationCounts: _annCounts,
+                          onPageSelected: (pg) {
+                            setState(() => _visPage = pg);
+                            _scrollToPage(pg - 1);
+                          },
+                        ),
+                      ),
+                    Expanded(
+                      child: _docLoading
+                          ? const Center(child: CircularProgressIndicator(color: DS.indigo))
+                          : _docError != null
+                              ? _errorView()
+                              : _doc == null
+                                  ? const SizedBox()
+                                  : _pageList(),
+                    ),
+                  ],
+                ),
+              ),
+              if (!isWideWeb && _showThumbs && _doc != null)
+                SizedBox(
+                  height: 80,
+                  child: ThumbnailStrip(
+                    document: _doc!,
+                    pageCount: _pageCount,
+                    currentPage: _visPage,
+                    darkMode: _darkMode,
+                    annotationCounts: _annCounts,
+                    onPageSelected: (pg) {
+                      setState(() => _visPage = pg);
+                      _scrollToPage(pg - 1);
+                    },
+                  ),
+                ),
+              _BottomBar(
+                current: _currentTab,
+                currentTool: _tool,
+                isSaving: _isSaving,
+                docLoading: _docLoading,
+                darkMode: _darkMode,
+                showThumbs: _showThumbs,
+                inkColor: _inkColor,
+                onTabChange: _switchTab,
+                onToolChange: _onToolChanged,
+                onColorChange: (c) => setState(() => _inkColor = c),
+                onUndo: _undo,
+                onSave: _save,
+                onShare: _share,
+                onPrint: _print,
+                onSearch: () {},
+                onDark: () => setState(() => _darkMode = !_darkMode),
+                onThumbs: () => setState(() => _showThumbs = !_showThumbs),
+                onProfile: () => SignerProfileDialog.show(context).then((_) => _loadProfile()),
+                onSlots: () => SignatureSlotsPanel.show(
+                  context: context,
+                  slots: _slots,
+                  activeSlotId: _activeSlotId,
+                  onChanged: (s, a) => setState(() { _slots = s; _activeSlotId = a; }),
+                ),
+                onClauses: () => ClausePanel.show(
+                  context: context,
+                  bookmarks: _clauses,
+                  onNavigate: _scrollToPage,
+                  onDelete: (id) => setState(() {
+                    for (final l in _clauses.values) l.removeWhere((b) => b.id == id);
+                  }),
+                ),
+                onSummary: () => AnnotationSummaryPanel.show(
+                  context: context,
+                  rects: _rects,
+                  ink: _ink,
+                  notes: _notes,
+                  sigs: _sigs,
+                  stamps: _stamps,
+                  redactions: _redacts,
+                  bookmarks: _clauses,
+                  onNavigate: (pg) {
+                    setState(() => _visPage = pg + 1);
+                    _scrollToPage(pg);
+                  },
+                ),
+                onCompare: () => DocumentCompareScreen.show(context, widget.filePath),
+                onAudit: () => AuditTrailSheet.show(
+                  context: context,
+                  documentName: p.basename(widget.filePath),
+                  events: [
+                    AuditEvent.created(p.basename(widget.filePath)),
+                    ...(_sigs.values.expand((l) => l).map((s) => s.isInitials
+                        ? AuditEvent.initialled(s.signerName ?? 'Unknown', s.pageIndex + 1)
+                        : AuditEvent.signed(s.signerName ?? 'Unknown', s.pageIndex + 1))),
+                  ],
+                ),
+                onTools: _openTools,
+              ),
+            ],
+          ),
+          _floatingZoomButtons(),
+        ],
+      ),
+    );
+  }
 }
 
+// ============================================================================
+// Bottom Bar (unchanged)
+// ============================================================================
 enum _TabMode { edit, annotate, fillSign, all }
 
 class _SidebarThumbs extends StatefulWidget {
@@ -395,10 +743,12 @@ class _SidebarThumbsState extends State<_SidebarThumbs> {
 }
 
 class _BottomBar extends StatelessWidget {
-  final _TabMode current; final AnnotationTool currentTool; final bool isSaving, darkMode, showThumbs; final Color inkColor;
+  final _TabMode current; final AnnotationTool currentTool; final bool isSaving, docLoading, darkMode, showThumbs; final Color inkColor;
   final ValueChanged<_TabMode> onTabChange; final ValueChanged<AnnotationTool> onToolChange; final ValueChanged<Color> onColorChange;
-  final VoidCallback onUndo, onSave, onShare, onPrint, onSearch, onDark, onThumbs, onProfile, onSlots, onClauses, onSummary, onCompare, onAudit, onTools;
-  const _BottomBar({required this.current, required this.currentTool, required this.isSaving, required this.darkMode, required this.showThumbs, required this.inkColor, required this.onTabChange, required this.onToolChange, required this.onColorChange, required this.onUndo, required this.onSave, required this.onShare, required this.onPrint, required this.onSearch, required this.onDark, required this.onThumbs, required this.onProfile, required this.onSlots, required this.onClauses, required this.onSummary, required this.onCompare, required this.onAudit, required this.onTools});
+  final VoidCallback onUndo, onSave, onShare, onPrint, onDark, onThumbs, onProfile, onSlots, onClauses, onSummary, onCompare, onAudit, onTools;
+  final VoidCallback onSearch;
+
+  const _BottomBar({required this.current, required this.currentTool, required this.isSaving, required this.docLoading, required this.darkMode, required this.showThumbs, required this.inkColor, required this.onTabChange, required this.onToolChange, required this.onColorChange, required this.onUndo, required this.onSave, required this.onShare, required this.onPrint, required this.onSearch, required this.onDark, required this.onThumbs, required this.onProfile, required this.onSlots, required this.onClauses, required this.onSummary, required this.onCompare, required this.onAudit, required this.onTools});
 
   @override Widget build(BuildContext context) => Container(
     decoration: const BoxDecoration(color: DS.bgCard, border: Border(top: BorderSide(color: DS.separator, width: 0.5))),
@@ -410,9 +760,45 @@ class _BottomBar extends StatelessWidget {
   List<Widget> _toolsForTab() {
     switch (current) {
       case _TabMode.edit: return [_tb(Icons.text_fields_rounded, 'Text', AnnotationTool.textStamp, DS.indigo), _tb(Icons.sticky_note_2_rounded, 'Note', AnnotationTool.stickyNote, DS.orange), _ab(Icons.undo_rounded, 'Undo', onUndo)];
-      case _TabMode.annotate: return [_tb(Icons.highlight_rounded, 'Highlight', AnnotationTool.highlight, const Color(0xFFFFD600)), _tb(Icons.format_underline_rounded, 'Underline', AnnotationTool.underline, const Color(0xFF38BDF8)), _tb(Icons.strikethrough_s_rounded, 'Strike', AnnotationTool.strikethrough, const Color(0xFFF87171)), _tb(Icons.brush_rounded, 'Draw', AnnotationTool.ink, inkColor), if (currentTool == AnnotationTool.ink) _colorPalette(), _tb(Icons.sticky_note_2_rounded, 'Note', AnnotationTool.stickyNote, const Color(0xFFFB923C)), _tb(Icons.hide_source_rounded, 'Redact', AnnotationTool.redaction, DS.red), _tb(Icons.bookmark_add_rounded, 'Clause', AnnotationTool.clauseBookmark, DS.green), _ab(Icons.undo_rounded, 'Undo', onUndo), _ab(Icons.build_rounded, 'Tools', onTools, color: DS.cyan)];
-      case _TabMode.fillSign: return [_tb(Icons.draw_rounded, 'Sign', AnnotationTool.signature, DS.purple), _tb(Icons.fingerprint_rounded, 'Initials', AnnotationTool.initials, const Color(0xFFA78BFA)), _tb(Icons.text_fields_rounded, 'Text', AnnotationTool.textStamp, DS.indigo), _ab(Icons.people_rounded, 'Slots', onSlots), _ab(Icons.verified_rounded, 'Audit', onAudit), _ab(Icons.person_rounded, 'Profile', onProfile), isSaving ? const Padding(padding: EdgeInsets.symmetric(horizontal: 10), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: DS.indigo))) : _ab(Icons.save_rounded, kIsWeb ? 'Download' : 'Save', onSave, color: DS.indigo), _ab(kIsWeb ? Icons.download_rounded : Icons.ios_share_rounded, kIsWeb ? 'Export' : 'Share', onShare, color: DS.indigo)];
-      case _TabMode.all: return [_tb(Icons.highlight_rounded, 'Highlight', AnnotationTool.highlight, const Color(0xFFFFD600)), _tb(Icons.brush_rounded, 'Draw', AnnotationTool.ink, inkColor), _tb(Icons.draw_rounded, 'Sign', AnnotationTool.signature, DS.purple), _tb(Icons.text_fields_rounded, 'Text', AnnotationTool.textStamp, DS.indigo), _tb(Icons.hide_source_rounded, 'Redact', AnnotationTool.redaction, DS.red), _ab(darkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded, 'Dark', onDark, color: darkMode ? Colors.amber : Colors.white38), _ab(showThumbs ? Icons.grid_on_rounded : Icons.grid_off_rounded, 'Pages', onThumbs, color: showThumbs ? DS.indigo : Colors.white38), _ab(Icons.compare_rounded, 'Compare', onCompare), _ab(Icons.print_rounded, 'Print', onPrint), _ab(Icons.search_rounded, 'Search', onSearch), _ab(Icons.undo_rounded, 'Undo', onUndo)];
+      case _TabMode.annotate: return [
+        _tb(Icons.highlight_rounded, 'Highlight', AnnotationTool.highlight, const Color(0xFFFFD600)),
+        _tb(Icons.format_underline_rounded, 'Underline', AnnotationTool.underline, const Color(0xFF38BDF8)),
+        _tb(Icons.strikethrough_s_rounded, 'Strike', AnnotationTool.strikethrough, const Color(0xFFF87171)),
+        _tb(Icons.brush_rounded, 'Draw', AnnotationTool.ink, inkColor),
+        if (currentTool == AnnotationTool.ink) _colorPalette(),
+        _tb(Icons.sticky_note_2_rounded, 'Note', AnnotationTool.stickyNote, const Color(0xFFFB923C)),
+        _tb(Icons.hide_source_rounded, 'Redact', AnnotationTool.redaction, DS.red),
+        _tb(Icons.bookmark_add_rounded, 'Clause', AnnotationTool.clauseBookmark, DS.green),
+        _ab(Icons.undo_rounded, 'Undo', onUndo),
+        _ab(Icons.build_rounded, 'Tools', onTools, color: DS.cyan),
+      ];
+      case _TabMode.fillSign: return [
+        _tb(Icons.draw_rounded, 'Sign', AnnotationTool.signature, DS.purple),
+        _tb(Icons.fingerprint_rounded, 'Initials', AnnotationTool.initials, const Color(0xFFA78BFA)),
+        _tb(Icons.text_fields_rounded, 'Text', AnnotationTool.textStamp, DS.indigo),
+        _ab(Icons.people_rounded, 'Slots', onSlots),
+        _ab(Icons.verified_rounded, 'Audit', onAudit),
+        _ab(Icons.person_rounded, 'Profile', onProfile),
+        if (docLoading)
+          _ab(Icons.save_rounded, kIsWeb ? 'Download (loading...)' : 'Save (loading...)', () {}, color: Colors.white24)
+        else if (isSaving)
+          const Padding(padding: EdgeInsets.symmetric(horizontal: 10), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: DS.indigo)))
+        else
+          _ab(Icons.save_rounded, kIsWeb ? 'Download' : 'Save', onSave, color: DS.indigo),
+        _ab(kIsWeb ? Icons.download_rounded : Icons.ios_share_rounded, kIsWeb ? 'Export' : 'Share', onShare, color: DS.indigo),
+      ];
+      case _TabMode.all: return [
+        _tb(Icons.highlight_rounded, 'Highlight', AnnotationTool.highlight, const Color(0xFFFFD600)),
+        _tb(Icons.brush_rounded, 'Draw', AnnotationTool.ink, inkColor),
+        _tb(Icons.draw_rounded, 'Sign', AnnotationTool.signature, DS.purple),
+        _tb(Icons.text_fields_rounded, 'Text', AnnotationTool.textStamp, DS.indigo),
+        _tb(Icons.hide_source_rounded, 'Redact', AnnotationTool.redaction, DS.red),
+        _ab(darkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded, 'Dark', onDark, color: darkMode ? Colors.amber : Colors.white38),
+        _ab(showThumbs ? Icons.grid_on_rounded : Icons.grid_off_rounded, 'Pages', onThumbs, color: showThumbs ? DS.indigo : Colors.white38),
+        _ab(Icons.compare_rounded, 'Compare', onCompare),
+        _ab(Icons.print_rounded, 'Print', onPrint),
+        _ab(Icons.undo_rounded, 'Undo', onUndo),
+      ];
     }
   }
 

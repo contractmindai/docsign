@@ -52,14 +52,12 @@ class _HomeScreenState extends State<HomeScreen> {
   void _snack(String msg, {bool err = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg, style: const TextStyle(color: Colors.white, fontSize: 13)),
+      content: Text(msg, style: const TextStyle(color: DS.textPrimary, fontSize: 13)),
       backgroundColor: err ? DS.red : DS.bgCard2,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       margin: const EdgeInsets.all(12)));
   }
-
-
 
   @override
   Widget build(BuildContext context) {
@@ -67,62 +65,170 @@ class _HomeScreenState extends State<HomeScreen> {
     return kIsWeb ? _buildWebLayout() : _buildMobileLayout();
   }
 
-  // ── Web layout ──────────────────────────────────────────────────
-  Widget _buildWebLayout() {
-    return Scaffold(
-      backgroundColor: DS.bg,
-      body: Row(children: [
+  // ── Web layout (light theme) ───────────────────────────────────────────
+Widget _buildWebLayout() {
+  return Scaffold(
+    backgroundColor: DS.bg,
+    body: Row(
+      children: [
         Container(
           width: 232,
           color: DS.bgCard,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const SizedBox(height: 24),
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 18),
-              child: Row(children: [
-                Container(width: 30, height: 30,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8)),
-                          child: Image.asset('icons/logo.png', width: 30, height: 30)),
-                const SizedBox(width: 10),
-                Text('DocSign', style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
-                const SizedBox(width: 6),
-                const DSBadge(text: 'PRO', color: DS.purple),
-              ])),
-            const SizedBox(height: 20),
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: PrimaryButton(label: 'Open PDF', icon: Icons.upload_file_rounded, onTap: _pickPdf, height: 40)),
-            const SizedBox(height: 6),
-            _SidebarItem(icon: Icons.home_rounded, label: 'Home', active: _tab == 0, onTap: () => setState(() => _tab = 0)),
-            _SidebarItem(icon: Icons.access_time_rounded, label: 'Recent', active: _tab == 1, onTap: () => setState(() => _tab = 1)),
-            _SidebarItem(icon: Icons.auto_awesome_rounded, label: 'Templates', active: _tab == 2, onTap: () => setState(() => _tab = 2)),
-            const Spacer(),
-            Container(height: 1, color: DS.separator),
-            const SizedBox(height: 10),
-            _SidebarItem(icon: Icons.document_scanner_rounded, label: 'Scanner', active: false, onTap: () => ScannerScreen.show(context), color: DS.green),
-            _SidebarItem(
-              icon: Icons.picture_as_pdf_rounded,
-              label: 'Create PDF',
-              active: false,
-              onTap: () => CreatePdfScreen.show(context),
-              color: DS.cyan,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 24),
 
+              // Logo
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Image.asset(
+                        'icons/logo.png',
+                        width: 30,
+                        height: 30,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'DocSign',
+                      style: GoogleFonts.inter(
+                        color: DS.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const DSBadge(
+                      text: 'PRO',
+                      color: DS.purple,
+                    ),
+                  ],
+                ),
+              ),
 
+              const SizedBox(height: 20),
 
-            _SidebarItem(
-              icon: Icons.build_rounded,
-              label: 'PDF Tools',
-              active: false,
-              onTap: () {},
-              color: DS.purple,
-            ),
-            const SizedBox(height: 16),
-          ])),
-        Container(width: 1, color: DS.separator),
-        Expanded(child: _webBody()),
-      ]),
-    );
-  }
+              // ✅ Open PDF Button (same style as sidebar)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: _pickPdf,
+                  child: Container(
+                    height: 44,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      color: DS.indigo.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: DS.indigo.withOpacity(0.22),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.upload_file_rounded,
+                          color: DS.indigo,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Open PDF',
+                          style: GoogleFonts.inter(
+                            color: DS.indigo,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              // Sidebar items
+              _SidebarItem(
+                icon: Icons.home_rounded,
+                label: 'Home',
+                active: _tab == 0,
+                onTap: () => setState(() => _tab = 0),
+              ),
+
+              _SidebarItem(
+                icon: Icons.access_time_rounded,
+                label: 'Recent',
+                active: _tab == 1,
+                onTap: () => setState(() => _tab = 1),
+              ),
+
+              _SidebarItem(
+                icon: Icons.auto_awesome_rounded,
+                label: 'Templates',
+                active: _tab == 2,
+                onTap: () => setState(() => _tab = 2),
+              ),
+
+              const Spacer(),
+
+              Container(
+                height: 1,
+                color: DS.separator,
+              ),
+
+              const SizedBox(height: 10),
+
+              _SidebarItem(
+                icon: Icons.document_scanner_rounded,
+                label: 'Scanner',
+                active: false,
+                onTap: () => ScannerScreen.show(context),
+                color: DS.green,
+              ),
+
+              _SidebarItem(
+                icon: Icons.picture_as_pdf_rounded,
+                label: 'Create PDF',
+                active: false,
+                onTap: () => CreatePdfScreen.show(context),
+                color: DS.cyan,
+              ),
+
+              _SidebarItem(
+                icon: Icons.build_rounded,
+                label: 'PDF Tools',
+                active: false,
+                onTap: () {},
+                color: DS.purple,
+              ),
+
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+
+        Container(
+          width: 1,
+          color: DS.separator,
+        ),
+
+        Expanded(
+          child: _webBody(),
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _webBody() {
     switch (_tab) {
@@ -190,7 +296,7 @@ class _SidebarItemState extends State<_SidebarItem> {
   }
 }
 
-// ========== WEB HOME ==========
+// ========== WEB HOME (light theme adjustments) ==========
 class _WebHome extends StatelessWidget {
   final List<_RecentEntry> recentPdfs;
   final VoidCallback onOpenPdf;
@@ -232,10 +338,10 @@ class _WebHome extends StatelessWidget {
       Text('Quick Actions', style: DS.title(size: 14)),
       const SizedBox(height: 12),
       Wrap(spacing: 10, runSpacing: 10, children: [
-        const _QuickAction(Icons.document_scanner_rounded, 'Scan', DS.green),
-        const _QuickAction(Icons.picture_as_pdf_rounded, 'Create PDF', DS.cyan),
-        const _QuickAction(Icons.auto_awesome_rounded, 'Templates', DS.orange),
-        const _QuickAction(Icons.compare_rounded, 'Compare', DS.purple),
+        _QuickAction(Icons.document_scanner_rounded, 'Scan', DS.green),
+        _QuickAction(Icons.picture_as_pdf_rounded, 'Create PDF', DS.cyan),
+        _QuickAction(Icons.auto_awesome_rounded, 'Templates', DS.orange),
+        _QuickAction(Icons.compare_rounded, 'Compare', DS.purple),
       ]),
       if (recentPdfs.isNotEmpty) ...[
         const SizedBox(height: 36),
@@ -247,7 +353,7 @@ class _WebHome extends StatelessWidget {
   Widget _stat(String value, String label) => Column(children: [
     Text(value, style: GoogleFonts.inter(fontSize: 26, fontWeight: FontWeight.w800, color: DS.indigo)),
     const SizedBox(height: 2),
-    Text(label, style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w600)),
+    Text(label, style: TextStyle(color: DS.textSecondary, fontSize: 10, fontWeight: FontWeight.w600)),
   ]);
 }
 
@@ -293,9 +399,11 @@ class _AnimatedDropZoneState extends State<_AnimatedDropZone> with SingleTickerP
             decoration: BoxDecoration(gradient: LinearGradient(colors: [DS.indigo, DS.indigo.withOpacity(0.7)]), borderRadius: BorderRadius.circular(14)),
             child: Icon(Icons.upload_file_rounded, color: Colors.white, size: _hover ? 28 : 24)),
           const SizedBox(height: 14),
-          AnimatedDefaultTextStyle(duration: const Duration(milliseconds: 200), style: DS.title(size: _hover ? 16 : 14).copyWith(color: _hover ? DS.indigo : Colors.white), child: const Text('Drop your PDF here or click to browse')),
+          AnimatedDefaultTextStyle(duration: const Duration(milliseconds: 200),
+            style: DS.title(size: _hover ? 16 : 14).copyWith(color: _hover ? DS.indigo : DS.textPrimary),
+            child: const Text('Drop your PDF here or click to browse')),
           const SizedBox(height: 4),
-          Text('Supports password-protected PDFs', style: DS.body(size: 11, color: Colors.white38)),
+          Text('Supports password-protected PDFs', style: DS.body(size: 11, color: DS.textSecondary)),
         ]),
       ),
     ),
@@ -307,9 +415,7 @@ class _QuickAction extends StatefulWidget {
   final String label;
   final Color color;
   final VoidCallback? onTap;
-
   const _QuickAction(this.icon, this.label, this.color, {this.onTap});
-
   @override
   State<_QuickAction> createState() => _QuickActionState();
 }
@@ -334,7 +440,7 @@ class _QuickActionState extends State<_QuickAction> {
         child: Row(children: [
           Icon(widget.icon, color: widget.color, size: 20),
           const SizedBox(width: 10),
-          Expanded(child: Text(widget.label, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600))),
+          Expanded(child: Text(widget.label, style: const TextStyle(color: DS.textPrimary, fontSize: 12, fontWeight: FontWeight.w600))),
         ]),
       ),
     ),
@@ -365,7 +471,7 @@ class _FileRowState extends State<_FileRow> {
         child: Row(children: [
           Container(width: 32, height: 32, decoration: BoxDecoration(color: DS.indigo.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.picture_as_pdf_rounded, color: DS.indigo, size: 16)),
           const SizedBox(width: 12),
-          Expanded(child: Text(widget.entry.displayName, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis)),
+          Expanded(child: Text(widget.entry.displayName, style: TextStyle(color: DS.textPrimary, fontSize: 13, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis)),
           if (_hover) DSIconBtn(icon: Icons.close_rounded, tooltip: 'Remove', onTap: widget.onRemove, color: DS.textTertiary, size: 15),
         ]),
       ),
@@ -394,7 +500,7 @@ class _WebTemplates extends StatelessWidget {
   ]);
 }
 
-// ========== MOBILE HOME ==========
+// ========== MOBILE HOME (unchanged – uses DS) ==========
 class _MobileHome extends StatelessWidget {
   final VoidCallback onOpenPdf, onScan, onNewDoc, onCreatePdf;
   final List<_RecentEntry> recentPdfs;
@@ -410,118 +516,128 @@ class _MobileHome extends StatelessWidget {
     required this.onRemove,
   });
 
- @override
-Widget build(BuildContext context) => SafeArea(
-      child: CustomScrollView(
-        physics: const BouncingScrollPhysics(),
-        slivers: [
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      GradientText('DocSign', style: DS.display(size: 32)),
-                      const Spacer(),
-                      const DSBadge(text: 'v2.0', color: DS.indigo),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text('Professional PDF tools', style: DS.body(size: 14)),
-                ],
-              ),
-            ),
-          ),
-
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: PrimaryButton(
-                label: 'Open a PDF',
-                icon: Icons.folder_open_rounded,
-                onTap: onOpenPdf,
-                height: 52,
-              ),
-            ),
-          ),
-
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-              child: GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 2.2,
-                children: [
-                  _MobileAction(Icons.document_scanner_rounded, 'Scanner', DS.green, onScan),
-                  _MobileAction(Icons.picture_as_pdf_rounded, 'Create PDF', DS.cyan, onCreatePdf),
-                  _MobileAction(Icons.note_add_rounded, 'New Doc', DS.purple, onNewDoc),
-                  _MobileAction(Icons.auto_awesome_rounded, 'Templates', DS.orange, () => Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(backgroundColor: DS.bg, appBar: AppBar(backgroundColor: DS.bgCard, elevation: 0, surfaceTintColor: Colors.transparent, leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20), onPressed: () => Navigator.pop(context)), title: Text('Templates', style: DS.title())), body: const SafeArea(child: TemplateGallery()))))),
-                ],
-              ),
-            ),
-          ),
-
-          if (recentPdfs.isEmpty)
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(40),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.inbox_rounded, size: 48, color: DS.textMuted),
-                      const SizedBox(height: 16),
-                      Text('No documents yet', style: DS.title(size: 16)),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Open a PDF to get started',
-                        style: DS.body(size: 13),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            )
-          else ...[
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 28, 20, 12),
-                child: Row(
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: CustomScrollView(
+      physics: const BouncingScrollPhysics(),
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Text('Recent', style: DS.title(size: 18)),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${recentPdfs.length}',
-                      style: DS.label(color: DS.textSecondary),
+                    GradientText('DocSign', style: DS.display(size: 32)),
+                    const Spacer(),
+                    const DSBadge(text: 'v2.0', color: DS.indigo),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text('Professional PDF tools', style: DS.body(size: 14)),
+              ],
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            child: PrimaryButton(
+              label: 'Open a PDF',
+              icon: Icons.folder_open_rounded,
+              onTap: onOpenPdf,
+              height: 52,
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+            child: GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: 2,
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 10,
+              childAspectRatio: 2.2,
+              children: [
+                _MobileAction(Icons.document_scanner_rounded, 'Scanner', DS.green, onScan),
+                _MobileAction(Icons.picture_as_pdf_rounded, 'Create PDF', DS.cyan, onCreatePdf),
+                _MobileAction(Icons.note_add_rounded, 'New Doc', DS.purple, onNewDoc),
+               _MobileAction(Icons.auto_awesome_rounded, 'Templates', DS.orange, () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => Scaffold(
+                        backgroundColor: DS.bg,
+                        appBar: AppBar(
+                          backgroundColor: DS.bgCard,
+                          elevation: 0,
+                          surfaceTintColor: Colors.transparent,
+                          leading: IconButton(
+                            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                          title: Text('Templates', style: DS.title()),
+                        ),
+                        body: const SafeArea(child: TemplateGallery()),
+                      ),
                     ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        ),
+        if (recentPdfs.isEmpty)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(40),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.inbox_rounded, size: 48, color: DS.textMuted),
+                    const SizedBox(height: 16),
+                    Text('No documents yet', style: DS.title(size: 16)),
+                    const SizedBox(height: 6),
+                    Text('Open a PDF to get started', style: DS.body(size: 13), textAlign: TextAlign.center),
                   ],
                 ),
               ),
             ),
-            SliverList.builder(
-              itemCount: recentPdfs.length,
-              itemBuilder: (_, i) {
-                final e = recentPdfs[i];
-                return _MobileFileRow(
-                  entry: e,
-                  onTap: () => onOpenRecent(e),
-                  onRemove: () => onRemove(e),
-                );
-              },
+          )
+        else ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 28, 20, 12),
+              child: Row(
+                children: [
+                  Text('Recent', style: DS.title(size: 18)),
+                  const SizedBox(width: 8),
+                  Text('${recentPdfs.length}', style: DS.label(color: DS.textSecondary)),
+                ],
+              ),
             ),
-            const SliverToBoxAdapter(child: SizedBox(height: 24)),
-          ],
+          ),
+          SliverList.builder(
+            itemCount: recentPdfs.length,
+            itemBuilder: (_, i) {
+              final e = recentPdfs[i];
+              return _MobileFileRow(
+                entry: e,
+                onTap: () => onOpenRecent(e),
+                onRemove: () => onRemove(e),
+              );
+            },
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
         ],
-      ),
-    );
+      ],
+    ),
+  );
 }
 
 class _MobileAction extends StatefulWidget {
@@ -533,13 +649,13 @@ class _MobileActionState extends State<_MobileAction> with SingleTickerProviderS
   late AnimationController _c; late Animation<double> _s;
   @override void initState() { super.initState(); _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 100)); _s = Tween(begin: 1.0, end: 0.94).animate(CurvedAnimation(parent: _c, curve: Curves.easeOut)); }
   @override void dispose() { _c.dispose(); super.dispose(); }
-  @override Widget build(BuildContext context) => GestureDetector(onTapDown: (_) => _c.forward(), onTapUp: (_) { _c.reverse(); widget.onTap(); }, onTapCancel: () => _c.reverse(), child: ScaleTransition(scale: _s, child: Container(decoration: BoxDecoration(color: DS.bgCard, borderRadius: BorderRadius.circular(14), border: Border.all(color: DS.separator, width: 0.5)), child: Row(children: [const SizedBox(width: 14), Container(width: 36, height: 36, decoration: BoxDecoration(color: widget.color.withOpacity(0.12), borderRadius: BorderRadius.circular(10)), child: Icon(widget.icon, color: widget.color, size: 18)), const SizedBox(width: 10), Text(widget.label, style: DS.label(size: 13, color: Colors.white))]))));
+  @override Widget build(BuildContext context) => GestureDetector(onTapDown: (_) => _c.forward(), onTapUp: (_) { _c.reverse(); widget.onTap(); }, onTapCancel: () => _c.reverse(), child: ScaleTransition(scale: _s, child: Container(decoration: BoxDecoration(color: DS.bgCard, borderRadius: BorderRadius.circular(14), border: Border.all(color: DS.separator, width: 0.5)), child: Row(children: [const SizedBox(width: 14), Container(width: 36, height: 36, decoration: BoxDecoration(color: widget.color.withOpacity(0.12), borderRadius: BorderRadius.circular(10)), child: Icon(widget.icon, color: widget.color, size: 18)), const SizedBox(width: 10), Text(widget.label, style: DS.label(size: 13, color: DS.textPrimary))]))));
 }
 
 class _MobileFileRow extends StatelessWidget {
   final _RecentEntry entry; final VoidCallback onTap, onRemove;
   const _MobileFileRow({required this.entry, required this.onTap, required this.onRemove});
-  @override Widget build(BuildContext context) => GestureDetector(onTap: onTap, child: Container(margin: const EdgeInsets.fromLTRB(20, 0, 20, 6), padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11), decoration: DS.card, child: Row(children: [Container(width: 34, height: 34, decoration: BoxDecoration(color: DS.indigo.withOpacity(0.1), borderRadius: BorderRadius.circular(9)), child: const Icon(Icons.picture_as_pdf_rounded, color: DS.indigo, size: 17)), const SizedBox(width: 12), Expanded(child: Text(entry.displayName, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis)), const Icon(Icons.arrow_forward_ios_rounded, size: 11, color: DS.textTertiary), const SizedBox(width: 4), GestureDetector(onTap: onRemove, child: const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.close_rounded, size: 14, color: DS.textSecondary)))])));
+  @override Widget build(BuildContext context) => GestureDetector(onTap: onTap, child: Container(margin: const EdgeInsets.fromLTRB(20, 0, 20, 6), padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11), decoration: DS.card, child: Row(children: [Container(width: 34, height: 34, decoration: BoxDecoration(color: DS.indigo.withOpacity(0.1), borderRadius: BorderRadius.circular(9)), child: const Icon(Icons.picture_as_pdf_rounded, color: DS.indigo, size: 17)), const SizedBox(width: 12), Expanded(child: Text(entry.displayName, style: TextStyle(color: DS.textPrimary, fontSize: 13, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis)), const Icon(Icons.arrow_forward_ios_rounded, size: 11, color: DS.textTertiary), const SizedBox(width: 4), GestureDetector(onTap: onRemove, child: const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.close_rounded, size: 14, color: DS.textSecondary)))])));
 }
 
 class _MobileRecents extends StatelessWidget {
@@ -556,7 +672,7 @@ class _MobileSettings extends StatelessWidget {
 class _SettingRow extends StatelessWidget {
   final IconData icon; final Color color; final String title, sub; final VoidCallback onTap;
   const _SettingRow(this.icon, this.color, this.title, this.sub, this.onTap);
-  @override Widget build(BuildContext context) => GestureDetector(onTap: onTap, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13), child: Row(children: [Container(width: 32, height: 32, decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(8)), child: Icon(icon, size: 16, color: color)), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)), Text(sub, style: DS.caption())])), Icon(Icons.arrow_forward_ios_rounded, size: 12, color: DS.textTertiary)])));
+  @override Widget build(BuildContext context) => GestureDetector(onTap: onTap, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13), child: Row(children: [Container(width: 32, height: 32, decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(8)), child: Icon(icon, size: 16, color: color)), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(color: DS.textPrimary, fontSize: 14, fontWeight: FontWeight.w500)), Text(sub, style: DS.caption())])), Icon(Icons.arrow_forward_ios_rounded, size: 12, color: DS.textTertiary)])));
 }
 
 class _PremiumNavBar extends StatelessWidget {
@@ -565,17 +681,14 @@ class _PremiumNavBar extends StatelessWidget {
   @override Widget build(BuildContext context) => Container(decoration: BoxDecoration(color: DS.bgCard, border: Border(top: BorderSide(color: DS.separator, width: 0.5))), child: SafeArea(top: false, child: SizedBox(height: 58, child: Row(children: tabs.asMap().entries.map((e) { final active = e.key == current; final (icon, label) = e.value; return Expanded(child: GestureDetector(onTap: () => onTap(e.key), behavior: HitTestBehavior.opaque, child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [AnimatedContainer(duration: const Duration(milliseconds: 200), width: 40, height: 28, decoration: BoxDecoration(color: active ? DS.indigo.withOpacity(0.12) : Colors.transparent, borderRadius: BorderRadius.circular(8)), child: Icon(icon, size: 19, color: active ? DS.indigoLight : DS.textSecondary)), const SizedBox(height: 2), Text(label, style: TextStyle(color: active ? DS.indigoLight : DS.textSecondary, fontSize: 10, fontWeight: active ? FontWeight.w600 : FontWeight.w500))]))); }).toList()))));
 }
 
-// ========== MOBILE FILE MANAGER (FULLY RESTORED) ==========
+// ========== MOBILE FILE MANAGER (image save with folder picker) ==========
 class _MobileFileManager extends StatefulWidget {
   const _MobileFileManager();
-
   @override
   State<_MobileFileManager> createState() => _MobileFileManagerState();
 }
 
 class _MobileFileManagerState extends State<_MobileFileManager> {
-
-
   Future<void> _openFile(File file) async {
     final extension = file.path.split('.').last.toLowerCase();
 
@@ -595,19 +708,13 @@ class _MobileFileManagerState extends State<_MobileFileManager> {
         ),
       );
       if (result != null) {
-        // 1. Let the user choose the folder
+        // Let the user choose the folder
         String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
-
         if (selectedDirectory != null) {
-          // 2. Create the file using the selected path
           final editedFile = File('$selectedDirectory/edited_${DateTime.now().millisecondsSinceEpoch}.png');
-          
-          // 3. Write the bytes
           await editedFile.writeAsBytes(result);
-          
           _snack('Saved: ${editedFile.path}');
         } else {
-          // User canceled the picker
           _snack('Save cancelled: No folder selected');
         }
       }
@@ -662,7 +769,6 @@ class _MobileFileManagerState extends State<_MobileFileManager> {
     }
   }
 
-
   Future<void> _openAnyFile() async {
     final result = await FilePicker.platform.pickFiles();
     if (result == null || !mounted) return;
@@ -674,7 +780,7 @@ class _MobileFileManagerState extends State<_MobileFileManager> {
   void _snack(String msg, {bool err = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg, style: const TextStyle(color: Colors.white)),
+      content: Text(msg, style: const TextStyle(color: DS.textPrimary)),
       backgroundColor: err ? DS.red : DS.bgCard2,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -695,11 +801,9 @@ class _MobileFileManagerState extends State<_MobileFileManager> {
               children: [
                 PrimaryButton(label: 'Open Any File', icon: Icons.file_open, onTap: _openAnyFile, height: 52),
                 const SizedBox(height: 12),
-
               ],
             ),
           ),
-
         ],
       ),
     );

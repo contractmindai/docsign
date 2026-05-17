@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
-// Conditional dart:io import - only on non-web
 import '../utils/web_download.dart';
 import 'platform_io_stub.dart'
     if (dart.library.io) 'platform_io_impl.dart';
@@ -11,22 +10,55 @@ import 'platform_io_stub.dart'
 // ─────────────────────────────────────────────────────────────────────────────
 // PlatformFileService - THE single source of truth for all file operations
 //
-// Rule: NEVER access PlatformFile.path, File(), or dart:io directly.
-// Use this service everywhere instead.
+// Performance notes:
+// - On mobile: NO in‑memory caching of file bytes (rely on disk)
+// - On web: bounded LRU cache (max 5 files or 200 MB total)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class PlatformFileService {
+  // Web‑only cache with size limits
+  static final Map<String, Uint8List> _webCache = {};
+  static int _webCacheTotalBytes = 0;
+  static const int _maxWebCacheBytes = 200 * 1024 * 1024; // 200 MB
+  static const int _maxWebCacheEntries = 5;
 
-  // In-memory cache: virtual path → bytes (used on web)
-  static final _cache = <String, Uint8List>{};
+  static void _addToWebCache(String path, Uint8List bytes) {
+    if (!kIsWeb) return;
+    
+    // Remove oldest if needed (using insertion order – LinkedHashMap not needed,
+    // but we'll evict by oldest key; simple approach: remove first key)
+    while (_webCache.length >= _maxWebCacheEntries ||
+           _webCacheTotalBytes + bytes.length > _maxWebCacheBytes) {
+      if (_webCache.isEmpty) break;
+      final oldestKey = _webCache.keys.first;
+      final oldBytes = _webCache.remove(oldestKey)!;
+      _webCacheTotalBytes -= oldBytes.length;
+    }
+    _webCache[path] = bytes;
+    _webCacheTotalBytes += bytes.length;
+  }
 
-  static void cache(String path, Uint8List bytes) => _cache[path] = bytes;
-  static Uint8List? getCached(String path) => _cache[path];
-  static void clearCache(String path) => _cache.remove(path);
+  static void cache(String path, Uint8List bytes) {
+    if (kIsWeb) {
+      _addToWebCache(path, bytes);
+    }
+    // On mobile: do nothing – no in‑memory cache
+  }
+
+  static Uint8List? getCached(String path) {
+    if (kIsWeb) return _webCache[path];
+    return null; // no caching on mobile
+  }
+
+  static void clearCache(String path) {
+    if (kIsWeb) {
+      final bytes = _webCache.remove(path);
+      if (bytes != null) _webCacheTotalBytes -= bytes.length;
+    }
+  }
 
   // ── Pick files ─────────────────────────────────────────────────────────────
 
-  /// Pick a PDF file. Returns null if cancelled.
   static Future<PickedFile?> pickPdf({String? password}) async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -38,7 +70,6 @@ class PlatformFileService {
     return _fromPlatformFile(result.files.first);
   }
 
-  /// Pick a document file (docx, txt, etc.)
   static Future<PickedFile?> pickDocument() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -50,7 +81,6 @@ class PlatformFileService {
     return _fromPlatformFile(result.files.first);
   }
 
-  /// Pick an image file
   static Future<PickedFile?> pickImage() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.image,
@@ -62,72 +92,64 @@ class PlatformFileService {
   }
 
   static PickedFile _fromPlatformFile(PlatformFile f) {
-    // ✅ On web: use f.bytes, NEVER f.path (throws on web)
-    // ✅ On mobile: use f.path, bytes may be null (not loaded)
     final bytes = f.bytes;
-    final path  = kIsWeb ? f.name : (f.path ?? f.name);
+    final path = kIsWeb ? f.name : (f.path ?? f.name);
 
     if (kIsWeb && bytes != null) {
-      _cache[path] = bytes;
+      _addToWebCache(path, bytes);
     }
 
     return PickedFile(
       displayName: f.name,
-      virtualPath:  path,
-      bytes:         bytes,
-      nativePath:    kIsWeb ? null : f.path,
+      virtualPath: path,
+      bytes: bytes,
+      nativePath: kIsWeb ? null : f.path,
     );
   }
 
   // ── Read file bytes ────────────────────────────────────────────────────────
 
-  /// Read bytes from a file path or virtual path.
   static Future<Uint8List?> readBytes(String path) async {
-    // Check cache first (always works on web and mobile)
-    final cached = _cache[path];
-    if (cached != null) return cached;
-
     if (kIsWeb) {
-      // Web: can only serve from cache
-      return null;
+      // Web: only from cache (no disk access)
+      return _webCache[path];
     } else {
-      // Mobile: read from disk
-      return ioReadBytes(path);
+      // Mobile: always read from disk, ignore cache
+      return await ioReadBytes(path);
     }
   }
 
-  /// Read text from a file.
   static Future<String?> readText(String path) async {
     final bytes = await readBytes(path);
     if (bytes == null) return null;
-    try { return String.fromCharCodes(bytes); } catch (_) { return null; }
+    try {
+      return String.fromCharCodes(bytes);
+    } catch (_) {
+      return null;
+    }
   }
 
   // ── Write file bytes ───────────────────────────────────────────────────────
 
-  /// Write bytes to a file.
-  /// Web: stores in memory cache. PDF files also trigger browser download.
-  /// Mobile: writes to disk.
   static Future<void> writeBytes(String path, Uint8List bytes,
       {bool download = false}) async {
-    _cache[path] = bytes; // always cache
     if (kIsWeb) {
-      // Auto-download PDFs saved via templates / create PDF
+      _addToWebCache(path, bytes);
       if (download || path.endsWith('.pdf')) {
         final name = path.contains('/') ? path.split('/').last
             : path.contains('\\') ? path.split('\\').last : path;
         downloadFile(name, bytes);
       }
     } else {
+      // Mobile: write to disk, do NOT cache in memory
       await ioWriteBytes(path, bytes);
     }
   }
 
   // ── Generate output path ───────────────────────────────────────────────────
 
-  /// Get a writable output path for a new file.
   static Future<String> outputPath(String filename) async {
-    if (kIsWeb) return filename; // virtual path on web
+    if (kIsWeb) return filename;
     final dir = await getApplicationDocumentsDirectory();
     return '${dir.path}/$filename';
   }
@@ -135,15 +157,19 @@ class PlatformFileService {
   // ── Check existence ────────────────────────────────────────────────────────
 
   static bool exists(String path) {
-    if (kIsWeb) return _cache.containsKey(path);
+    if (kIsWeb) return _webCache.containsKey(path);
     return ioExists(path);
   }
 
   // ── Delete ─────────────────────────────────────────────────────────────────
 
   static Future<void> delete(String path) async {
-    _cache.remove(path);
-    if (!kIsWeb) await ioDelete(path);
+    if (kIsWeb) {
+      final bytes = _webCache.remove(path);
+      if (bytes != null) _webCacheTotalBytes -= bytes.length;
+    } else {
+      await ioDelete(path);
+    }
   }
 }
 
@@ -151,9 +177,9 @@ class PlatformFileService {
 
 class PickedFile {
   final String displayName;
-  final String virtualPath;   // use everywhere as the "path" key
-  final Uint8List? bytes;     // available on web, may be null on mobile
-  final String? nativePath;   // only on mobile
+  final String virtualPath;
+  final Uint8List? bytes;
+  final String? nativePath;
 
   const PickedFile({
     required this.displayName,
