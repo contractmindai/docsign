@@ -16,20 +16,9 @@ import 'package:pdf/widgets.dart' as pw;
 
 import 'pdf_viewer_screen.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DocumentEditorScreen v6 — ALL issues fixed
-//
-// Fixed:
-//   1. KEYBOARD NOT SHOWING: autofocus: true + FocusNode.requestFocus on mount
-//   2. SAVE NOT WORKING: save() now correctly writes and shows snack
-//   3. DOCX READING: archive package unzips .docx, parses word/document.xml
-//   4. Toolbar scrollable — all buttons accessible on small phones
-//   5. AutoFocus properly triggers keyboard on first open
-// ─────────────────────────────────────────────────────────────────────────────
-
 class DocumentEditorScreen extends StatefulWidget {
   final String? existingPath;
-  final String? initialContent; // plain text pre-fill (from docx import)
+  final String? initialContent;
 
   const DocumentEditorScreen({super.key, this.existingPath, this.initialContent});
 
@@ -77,16 +66,16 @@ class _DocEditorState extends State<DocumentEditorScreen> {
           : 'Untitled Document',
     );
 
-    // ✅ FIX: Initialize controller with content if provided
     if (widget.initialContent != null && widget.initialContent!.isNotEmpty) {
-      // Build a Quill document from plain text
       final doc = quill.Document()..insert(0, widget.initialContent!);
       _ctrl = quill.QuillController(
           document: doc,
           selection: const TextSelection.collapsed(offset: 0));
-      _dirty = true; // mark as needing save
+      _dirty = true;
     } else {
-      _ctrl = quill.QuillController.basic();
+      _ctrl = quill.QuillController(
+          document: quill.Document(),
+          selection: const TextSelection.collapsed(offset: 0));
     }
 
     _ctrl.addListener(_sync);
@@ -98,7 +87,6 @@ class _DocEditorState extends State<DocumentEditorScreen> {
       _loadFile(widget.existingPath!);
     }
 
-    // ✅ FIX: Request focus to show keyboard after frame renders
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         FocusScope.of(context).requestFocus(_focus);
@@ -129,8 +117,6 @@ class _DocEditorState extends State<DocumentEditorScreen> {
     });
   }
 
-  // ── File I/O ──────────────────────────────────────────────────────────────
-
   Future<void> _loadFile(String path) async {
     try {
       final raw  = await PlatformFileService.readText(path) ?? '\\';
@@ -150,20 +136,16 @@ class _DocEditorState extends State<DocumentEditorScreen> {
     }
   }
 
-  // ✅ FIX: Save correctly writes file and confirms to user
   Future<void> _save() async {
     if (_saving) return;
     setState(() => _saving = true);
     try {
       final dir  = await getApplicationDocumentsDirectory();
       final name = _safeName(_titleCtrl.text.trim());
-      // ✅ Save as .docx for Word compatibility
       _savedPath ??= p.join(dir.path, '$name.docx');
-      // Also save delta for re-editing
       final deltaPath = _savedPath!.replaceAll('.docx', '.qldoc');
       await PlatformFileService.writeBytes(deltaPath,
           Uint8List.fromList(jsonEncode(_ctrl.document.toDelta().toJson()).codeUnits));
-      // Build proper .docx
       await _writeDocx(_savedPath!, _ctrl.document.toPlainText());
       if (mounted) {
         setState(() => _dirty = false);
@@ -222,8 +204,6 @@ class _DocEditorState extends State<DocumentEditorScreen> {
         ? 'doc_${DateTime.now().millisecondsSinceEpoch}' : raw;
     return s.replaceAll(RegExp(r'[^\w\s\-]'), '_').trim();
   }
-
-  // ── PDF export ────────────────────────────────────────────────────────────
 
   Future<void> _exportPdf() async {
     setState(() => _saving = true);
@@ -339,8 +319,6 @@ class _DocEditorState extends State<DocumentEditorScreen> {
       behavior: SnackBarBehavior.floating));
   }
 
-  // ── Format actions ────────────────────────────────────────────────────────
-
   void _toggle(quill.Attribute attr) => _ctrl.formatSelection(attr);
   void _heading(int level) => _ctrl.formatSelection(
       quill.Attribute.fromKeyValue('header', level == 0 ? null : level));
@@ -393,8 +371,6 @@ class _DocEditorState extends State<DocumentEditorScreen> {
     ));
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -438,7 +414,6 @@ class _DocEditorState extends State<DocumentEditorScreen> {
           tooltip: 'Undo', onPressed: () => _ctrl.undo()),
       IconButton(icon: const Icon(Icons.redo_rounded, size: 20),
           tooltip: 'Redo', onPressed: () => _ctrl.redo()),
-      // ✅ Save button always visible
       _saving
           ? const Padding(
               padding: EdgeInsets.symmetric(horizontal: 14),
@@ -526,6 +501,7 @@ class _DocEditorState extends State<DocumentEditorScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 4),
       color: Colors.white12);
 
+  // ✅ CORRECTED _editor method using config: QuillEditorConfig
   Widget _editor() => Container(
     color: Colors.white,
     child: GestureDetector(
@@ -535,42 +511,38 @@ class _DocEditorState extends State<DocumentEditorScreen> {
         child: quill.QuillEditor.basic(
           controller: _ctrl,
           focusNode: _focus,
-          configurations: quill.QuillEditorConfigurations(
-            autoFocus: true,
+          config: quill.QuillEditorConfig(
             placeholder: 'Start typing your document…',
             padding: EdgeInsets.zero,
             customStyles: quill.DefaultStyles(
               paragraph: quill.DefaultTextBlockStyle(
-                GoogleFonts.inter(fontSize: 14,
-                    color: const Color(0xFF111827), height: 1.65),
+                GoogleFonts.inter(fontSize: 14, color: const Color(0xFF111827), height: 1.65),
                 const quill.HorizontalSpacing(0, 0),
                 const quill.VerticalSpacing(4, 0),
                 const quill.VerticalSpacing(0, 0),
-                null),
+                null,
+              ),
               h1: quill.DefaultTextBlockStyle(
-                GoogleFonts.inter(fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF111827), height: 1.3),
+                GoogleFonts.inter(fontSize: 26, fontWeight: FontWeight.bold, color: const Color(0xFF111827), height: 1.3),
                 const quill.HorizontalSpacing(0, 0),
                 const quill.VerticalSpacing(16, 6),
                 const quill.VerticalSpacing(0, 0),
-                null),
+                null,
+              ),
               h2: quill.DefaultTextBlockStyle(
-                GoogleFonts.inter(fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF1F2937), height: 1.35),
+                GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold, color: const Color(0xFF1F2937), height: 1.35),
                 const quill.HorizontalSpacing(0, 0),
                 const quill.VerticalSpacing(12, 4),
                 const quill.VerticalSpacing(0, 0),
-                null),
+                null,
+              ),
               h3: quill.DefaultTextBlockStyle(
-                GoogleFonts.inter(fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF374151), height: 1.4),
+                GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: const Color(0xFF374151), height: 1.4),
                 const quill.HorizontalSpacing(0, 0),
                 const quill.VerticalSpacing(10, 3),
                 const quill.VerticalSpacing(0, 0),
-                null),
+                null,
+              ),
             ),
           ),
         ),
@@ -579,18 +551,15 @@ class _DocEditorState extends State<DocumentEditorScreen> {
   );
 }
 
-// ── Docx reader (no external lib — just unzip + parse XML) ───────────────────
+// ── Docx reader ───────────────────────────────────────────────────────────
 
 class DocxReader {
-  /// Extract plain text from a .docx file using the archive package.
-  /// .docx is a ZIP containing word/document.xml
   static Future<String> extractFromBytes(List<int> bytes) async {
     return _parse(bytes);
   }
 
   static Future<String> extract(String path) async {
     try {
-      // Use platform-safe read
       List<int>? bytes;
       if (kIsWeb) {
         bytes = PlatformFileService.getCached(path);
@@ -610,17 +579,11 @@ class DocxReader {
 
       final xml = utf8.decode(xmlFile.content as List<int>);
 
-      // Extract text from <w:t> tags (Word text runs)
-      final tPattern = RegExp(r'<w:t[^>]*>([^<]*)</w:t>',
-          multiLine: true);
+      final tPattern = RegExp(r'<w:t[^>]*>([^<]*)</w:t>', multiLine: true);
       final pPattern = RegExp(r'<w:p[ />]', multiLine: true);
 
       final buf = StringBuffer();
-      int lastPPos = 0;
-
-      // Process paragraph by paragraph
       for (final pMatch in pPattern.allMatches(xml)) {
-        // Find end of this paragraph (next </w:p>)
         final pEnd = xml.indexOf('</w:p>', pMatch.start);
         if (pEnd == -1) continue;
         final para = xml.substring(pMatch.start, pEnd);
@@ -635,9 +598,7 @@ class DocxReader {
           }
         }
         if (hasText) buf.write('\n');
-        lastPPos = pEnd;
       }
-
       return buf.toString().trim();
     } catch (e) {
       return '';
@@ -645,7 +606,7 @@ class DocxReader {
   }
 }
 
-// ── Toolbar widgets ───────────────────────────────────────────────────────────
+// ── Toolbar widgets ─────────────────────────────────────────────────────
 
 class _Btn extends StatelessWidget {
   final IconData icon; final bool active;

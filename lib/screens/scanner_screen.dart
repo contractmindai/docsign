@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -5,14 +6,65 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pro_image_editor/pro_image_editor.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:image/image.dart' as img;
+import 'package:doc_scan_flutter/doc_scan.dart';
 
 import '../utils/platform_file_service.dart';
 import '../utils/web_download.dart';
 import '../widgets/ds.dart';
 import 'pdf_viewer_screen.dart';
+
+// ---------------------------------------------------------------------------
+// Smart Document Classifier (reuses TextRecognizer)
+// ---------------------------------------------------------------------------
+class SmartDocumentClassifier {
+  final TextRecognizer _recognizer = TextRecognizer(script: TextRecognitionScript.latin);
+
+  Future<String> classify(Uint8List bytes) async {
+    try {
+      final dir = await getTemporaryDirectory();
+      final tempFile = File('${dir.path}/classify_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      await tempFile.writeAsBytes(bytes);
+      final inputImage = InputImage.fromFile(tempFile);
+      final recognized = await _recognizer.processImage(inputImage);
+      await tempFile.delete();
+      final text = recognized.text.toLowerCase();
+      if (text.contains('invoice')) return 'Invoice';
+      if (text.contains('receipt')) return 'Receipt';
+      if (text.contains('id card') || text.contains('passport')) return 'ID Card';
+      if (text.contains('contract') || text.contains('agreement')) return 'Contract';
+      if (text.isNotEmpty) return 'Document';
+      return 'Uncategorized';
+    } catch (e) {
+      debugPrint('Classification error: $e');
+      return 'Uncategorized';
+    }
+  }
+
+  void dispose() => _recognizer.close();
+}
+
+// ---------------------------------------------------------------------------
+// Page model
+// ---------------------------------------------------------------------------
+class _Page {
+  final String name;
+  final Uint8List bytes;
+  int n;
+  String category;
+  _Page({
+    required this.name,
+    required this.bytes,
+    required this.n,
+    this.category = 'Uncategorized',
+  });
+}
 
 class ScannerScreen extends StatefulWidget {
   const ScannerScreen({super.key});
@@ -31,15 +83,127 @@ class _ScannerScreenState extends State<ScannerScreen> {
   final List<_Page> _pages = [];
   bool _grayscale = false;
   bool _building = false;
+  bool _batchMode = false;
+  bool _extractText = false;
+
+  late SmartDocumentClassifier _classifier;
+  late final TextRecognizer _ocrRecognizer; // dedicated for OCR
+
+  @override
+  void initState() {
+    super.initState();
+    _classifier = SmartDocumentClassifier();
+    _ocrRecognizer = TextRecognizer(); // reusable for all OCR calls
+  }
+
+  @override
+  void dispose() {
+    _classifier.dispose();
+    _ocrRecognizer.close();
+    super.dispose();
+  }
 
   // --------------------------------------------------------------------------
-  // Image processing (unchanged)
+  // Clear all pages and cache
+  // --------------------------------------------------------------------------
+  void _clearAll() async {
+    setState(() {
+      _pages.clear();
+    });
+    // Clear cached files (optional)
+     PlatformFileService.clearCache(); // implement if not exists (see below)
+    _snack('Cleared all pages');
+  }
+
+  // --------------------------------------------------------------------------
+  // Scan using doc_scan_flutter
+  // --------------------------------------------------------------------------
+  Future<void> _autoDetectScan() async {
+    if (kIsWeb) {
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Not available on web'),
+          content: const Text(
+              'Document scanning requires a real device with a camera.\n\nPlease use the mobile app or upload images from the gallery.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(_), child: const Text('OK'))],
+        ),
+      );
+      return;
+    }
+
+    try {
+      final List<String>? scannedImages = await DocumentScanner.scan();
+
+      if (scannedImages != null && scannedImages.isNotEmpty && mounted) {
+        for (final imagePath in scannedImages) {
+          final bytes = await File(imagePath).readAsBytes();
+          await _addScannedPage(bytes, 'scan_${DateTime.now().millisecondsSinceEpoch}.jpg');
+        }
+
+        if (_batchMode && mounted) {
+          _autoDetectScan();
+        }
+      }
+    } on DocumentScannerException catch (e) {
+      if (mounted) _snack('Scanning error: $e', err: true);
+    } catch (e) {
+      if (mounted) _snack('An unexpected error occurred: $e', err: true);
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Gallery pick
+  // --------------------------------------------------------------------------
+  Future<void> _gallery() async {
+    try {
+      final files = await _picker.pickMultiImage(imageQuality: 92);
+      if (!mounted || files.isEmpty) return;
+      for (final f in files) {
+        final bytes = await f.readAsBytes();
+        if (bytes.isEmpty || !mounted) continue;
+        await _processAndAddImage(bytes, f.name);
+        if (_extractText && mounted) {
+          await _performOCR(bytes);
+        }
+      }
+    } catch (e) {
+      _snack('Gallery: $e', err: true);
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Process image: manual editor → grayscale → classification (category)
   // --------------------------------------------------------------------------
   Future<void> _processAndAddImage(Uint8List bytes, String name) async {
-    final editedBytes = await Navigator.push<Uint8List>(
+    final edited = await _launchManualEditor(bytes);
+    if (edited == null) return;
+    final finalBytes = _grayscale ? _applyGrayscale(edited) : edited;
+
+    if (finalBytes.isNotEmpty && mounted) {
+      String category = 'Uncategorized';
+      try {
+        category = await _classifier.classify(finalBytes);
+      } catch (_) {}
+      setState(() {
+        _pages.add(_Page(
+          name: name,
+          bytes: finalBytes,
+          n: _pages.length + 1,
+          category: category,
+        ));
+      });
+      if (_batchMode && mounted) {
+        _autoDetectScan();
+      }
+    }
+  }
+
+  Future<Uint8List?> _launchManualEditor(Uint8List bytes) async {
+    return Navigator.push<Uint8List>(
       context,
       MaterialPageRoute(
-        builder: (context) => ProImageEditor.memory(
+        builder: (_) => ProImageEditor.memory(
           bytes,
           callbacks: ProImageEditorCallbacks(
             onImageEditingComplete: (Uint8List editedBytes) async {
@@ -50,69 +214,66 @@ class _ScannerScreenState extends State<ScannerScreen> {
         ),
       ),
     );
-
-    if (editedBytes != null && mounted) {
-      setState(() {
-        _pages.add(
-          _Page(
-            name: name,
-            bytes: _grayscale ? _applyGrayscale(editedBytes) : editedBytes,
-            n: _pages.length + 1,
-          ),
-        );
-      });
-    }
   }
 
-  Uint8List _applyGrayscale(Uint8List bytes) => bytes; // implement if needed
-
-  // --------------------------------------------------------------------------
-  // Capture methods (unchanged)
-  // --------------------------------------------------------------------------
-  Future<void> _camera() async {
-    try {
-      final f = await _picker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 95,
-        preferredCameraDevice: CameraDevice.rear,
-      );
-      if (f == null || !mounted) return;
-      final bytes = await f.readAsBytes();
-      if (bytes.isEmpty) return;
-      await _processAndAddImage(bytes, f.name);
-    } catch (e) {
-      _snack('Camera: $e', err: true);
-    }
+  Uint8List _applyGrayscale(Uint8List bytes) {
+    final original = img.decodeImage(bytes);
+    if (original == null) return bytes;
+    final gray = img.grayscale(original);
+    return Uint8List.fromList(img.encodeJpg(gray, quality: 85));
   }
 
-  Future<void> _gallery() async {
+  // --------------------------------------------------------------------------
+  // Optimized OCR (reuses recognizer, no double decoding)
+  // --------------------------------------------------------------------------
+  Future<void> _performOCR(Uint8List imageBytes) async {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
     try {
-      final files = await _picker.pickMultiImage(imageQuality: 92);
-      if (!mounted || files.isEmpty) return;
-      for (final f in files) {
-        final bytes = await f.readAsBytes();
-        if (bytes.isEmpty || !mounted) continue;
-        await _processAndAddImage(bytes, f.name);
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File('${tempDir.path}/ocr_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      await tempFile.writeAsBytes(imageBytes);
+      final inputImage = InputImage.fromFile(tempFile);
+      final recognized = await _ocrRecognizer.processImage(inputImage);
+      await tempFile.delete();
+
+      if (mounted) {
+        Navigator.pop(context);
+        if (recognized.text.isNotEmpty) {
+          await showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Extracted Text'),
+              content: SingleChildScrollView(
+                child: Text(recognized.text, style: const TextStyle(fontSize: 14)),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(_),
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+          );
+        } else {
+          _snack('No text found in this image.');
+        }
       }
     } catch (e) {
-      _snack('Gallery: $e', err: true);
+      if (mounted) {
+        Navigator.pop(context);
+        _snack('OCR error: $e', err: true);
+      }
     }
   }
 
   // --------------------------------------------------------------------------
-  // Page management
-  // --------------------------------------------------------------------------
-  void _delete(int i) {
-    setState(() {
-      _pages.removeAt(i);
-      for (int k = 0; k < _pages.length; k++) {
-        _pages[k].n = k + 1;
-      }
-    });
-  }
-
-  // --------------------------------------------------------------------------
-  // PDF creation (unchanged)
+  // PDF creation with automatic memory clear
   // --------------------------------------------------------------------------
   Future<void> _build() async {
     if (_pages.isEmpty) {
@@ -121,71 +282,61 @@ class _ScannerScreenState extends State<ScannerScreen> {
     }
 
     setState(() => _building = true);
-
     try {
       final doc = pw.Document(compress: true);
-
       const double targetDpi = 300.0;
       const double pdfDpi = 72.0;
       final double scale = pdfDpi / targetDpi;
 
       for (final pg in _pages) {
         final Uint8List bytes = pg.bytes;
-
-        // Validate image bytes (optional)
         if (bytes.length < 100) {
           _snack('Image data corrupted for ${pg.name}', err: true);
           continue;
         }
-
-        // Decode image to get dimensions
         final codec = await ui.instantiateImageCodec(bytes);
         final frame = await codec.getNextFrame();
-        final img = frame.image;
-        final pxW = img.width.toDouble();
-        final pxH = img.height.toDouble();
-        img.dispose();
+        final imgWidget = frame.image;
+        final pxW = imgWidget.width.toDouble();
+        final pxH = imgWidget.height.toDouble();
+        imgWidget.dispose();
         codec.dispose();
-
         final pageW = pxW * scale;
         final pageH = pxH * scale;
-
         doc.addPage(
           pw.Page(
             pageFormat: PdfPageFormat(pageW, pageH),
             margin: pw.EdgeInsets.zero,
-            build: (_) => pw.Image(
-              pw.MemoryImage(bytes),
-              fit: pw.BoxFit.fill,
-            ),
+            build: (_) => pw.Image(pw.MemoryImage(bytes), fit: pw.BoxFit.fill),
           ),
         );
       }
 
       final pdfBytes = Uint8List.fromList(await doc.save());
-      final name = 'scan_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final defaultName = 'scan_${DateTime.now().millisecondsSinceEpoch}.pdf';
+
+      // Clear pages from memory
+      setState(() => _pages.clear());
 
       if (kIsWeb) {
-        downloadFile(name, pdfBytes);
+        downloadFile(defaultName, pdfBytes);
         if (mounted) {
-          await Navigator.pushReplacement(
+          Navigator.pushReplacement(
             context,
             MaterialPageRoute(
               builder: (_) => PdfViewerScreen(
-                filePath: name,
+                filePath: defaultName,
                 preloadedBytes: pdfBytes,
               ),
             ),
           );
         }
       } else {
-        final path = await _saveToDisk(pdfBytes);
+        final path = await _saveToDisk(pdfBytes, defaultName);
         if (mounted) {
-          await Navigator.pushReplacement(
+          Navigator.pushReplacement(
             context,
-            MaterialPageRoute(
-              builder: (_) => PdfViewerScreen(filePath: path),
-            ),
+            MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path)),
           );
         }
       }
@@ -196,9 +347,9 @@ class _ScannerScreenState extends State<ScannerScreen> {
     }
   }
 
-
-  Future<String> _saveToDisk(Uint8List bytes) async {
-    final path = await PlatformFileService.outputPath('scan_${DateTime.now().millisecondsSinceEpoch}.pdf');
+  Future<String> _saveToDisk(Uint8List bytes, String fileName) async {
+    final safeName = fileName.endsWith('.pdf') ? fileName : '$fileName.pdf';
+    final path = await PlatformFileService.outputPath(safeName);
     await PlatformFileService.writeBytes(path, bytes);
     return path;
   }
@@ -216,6 +367,66 @@ class _ScannerScreenState extends State<ScannerScreen> {
     );
   }
 
+Future<String?> _askFileName({String? defaultName}) async {
+  final controller = TextEditingController(text: defaultName ?? 'document');
+  return showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: DS.bgCard,
+      title: Text('Save PDF as',
+          style: GoogleFonts.inter(color: Colors.white, fontSize: 16)),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          hintText: 'Enter file name',
+          filled: true,
+          fillColor: DS.bgCard2,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+          style: FilledButton.styleFrom(backgroundColor: DS.indigo),
+          child: const Text('Create PDF'),
+        ),
+      ],
+    ),
+  );
+}
+
+Future<void> _addScannedPage(Uint8List bytes, String name) async {
+  // Apply grayscale if the user wants it
+  final finalBytes = _grayscale ? _applyGrayscale(bytes) : bytes;
+
+  if (finalBytes.isNotEmpty && mounted) {
+    // Classify the page
+    String category = 'Uncategorized';
+    try {
+      category = await _classifier.classify(finalBytes);
+    } catch (_) {}
+
+    setState(() {
+      _pages.add(_Page(
+        name: name,
+        bytes: finalBytes,
+        n: _pages.length + 1,
+        category: category,
+      ));
+    });
+
+    // OCR if text extraction is on
+    if (_extractText && mounted) {
+      await _performOCR(finalBytes);
+    }
+  }
+}
   // --------------------------------------------------------------------------
   // UI Builders
   // --------------------------------------------------------------------------
@@ -239,18 +450,26 @@ class _ScannerScreenState extends State<ScannerScreen> {
         centerTitle: true,
         actions: [
           if (_pages.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilledButton.icon(
-                onPressed: _building ? null : _build,
-                icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
-                label: Text('Create PDF (${_pages.length})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                style: FilledButton.styleFrom(
-                  backgroundColor: DS.green,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.delete_sweep_rounded, color: DS.red, size: 22),
+                  tooltip: 'Clear all',
+                  onPressed: _clearAll,
                 ),
-              ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: _building ? null : _build,
+                  icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+                  label: Text('Create PDF (${_pages.length})',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: DS.green,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  ),
+                ),
+              ],
             ),
         ],
       ),
@@ -277,7 +496,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
               child: Icon(Icons.document_scanner_rounded, size: 52, color: DS.indigo.withOpacity(0.6)),
             ),
             const SizedBox(height: 32),
-            Text('Scan Documents', style: GoogleFonts.inter(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700)),
+            Text('Scan Documents',
+                style: GoogleFonts.inter(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
             const Text(
               'Capture pages with your camera or upload from gallery\nto create a professional PDF document',
@@ -290,38 +510,29 @@ class _ScannerScreenState extends State<ScannerScreen> {
     );
   }
 
-  // ✅ Improved: Responsive grid with better columns
   Widget _pageGrid() {
     return LayoutBuilder(
       builder: (context, constraints) {
         final w = constraints.maxWidth;
         int crossAxisCount;
-        if (w < 420) {
-          crossAxisCount = 2; // mobile
-        } else if (w < 900) {
-          crossAxisCount = 3; // tablet
-        } else {
-          crossAxisCount = 4; // desktop
-        }
+        if (w < 420) crossAxisCount = 2;
+        else if (w < 900) crossAxisCount = 3;
+        else crossAxisCount = 4;
 
         return Column(
           children: [
-            Container(
-              color: DS.bgCard,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Row(
+            Row(
                 children: [
                   const Icon(Icons.collections_rounded, color: DS.indigo, size: 18),
                   const SizedBox(width: 8),
-                  Text(
-                    '${_pages.length} page${_pages.length == 1 ? '' : 's'} · Tap × to remove',
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
                   const Spacer(),
                   _chip('B&W', _grayscale, () => setState(() => _grayscale = !_grayscale)),
+                  const SizedBox(width: 8),
+                  _chip('Batch', _batchMode, () => setState(() => _batchMode = !_batchMode)),
+                  const SizedBox(width: 8),
+                  _chip('Extract Text', _extractText, () => setState(() => _extractText = !_extractText)),
                 ],
               ),
-            ),
             const Divider(height: 1, color: DS.separator),
             Expanded(
               child: GridView.builder(
@@ -343,7 +554,6 @@ class _ScannerScreenState extends State<ScannerScreen> {
     );
   }
 
-  // ✅ Modern document card with gradient and better styling
   Widget _pageTile(int i) {
     final pg = _pages[i];
     return GestureDetector(
@@ -352,13 +562,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
           color: DS.bgCard2,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.25),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 10, offset: const Offset(0, 4))],
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(14),
@@ -366,7 +570,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
             fit: StackFit.expand,
             children: [
               Image.memory(pg.bytes, fit: BoxFit.cover),
-              // Subtle gradient overlay
+              // Gradient overlay at the bottom
               Positioned(
                 bottom: 0,
                 left: 0,
@@ -382,23 +586,113 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   ),
                 ),
               ),
+              // Page number (bottom-left)
               Positioned(
                 bottom: 8,
                 left: 8,
-                child: Text(
-                  'Page ${pg.n}',
-                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                child: Text('Page ${pg.n}',
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+              // Category label (bottom-right)
+              Positioned(
+                bottom: 8,
+                right: 8,
+                child: GestureDetector(
+                  onTap: () => _showCategoryPicker(i),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(6)),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.label_outline, size: 10, color: Colors.white70),
+                        const SizedBox(width: 4),
+                        Text(pg.category, style: const TextStyle(color: Colors.white70, fontSize: 10)),
+                      ],
+                    ),
+                  ),
                 ),
               ),
+              // ── Delete button (top‑right) ──
+              Positioned(top: 6, right: 6, child: _deleteBtn(() => _delete(i))),
+
+              // ── NEW: OCR button (top‑left) ──
               Positioned(
                 top: 6,
-                right: 6,
-                child: _deleteBtn(() => _delete(i)),
+                left: 6,
+                child: GestureDetector(
+                  onTap: () => _performOCR(pg.bytes),   // ← runs OCR for this page
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white24, width: 1),
+                    ),
+                    child: const Icon(Icons.text_snippet, color: Colors.white, size: 14),
+                  ),
+                ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  void _delete(int i) {
+    setState(() {
+      _pages.removeAt(i);
+      for (int k = 0; k < _pages.length; k++) {
+        _pages[k].n = k + 1;
+      }
+    });
+  }
+
+  void _setCategory(int i, String cat) {
+    setState(() => _pages[i].category = cat);
+  }
+
+  void _showCategoryPicker(int index) {
+    final categories = ['Uncategorized', 'Document', 'Receipt', 'Invoice', 'ID Card', 'Contract', 'Other'];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: DS.bgCard,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (modalContext) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Set Category',
+                  style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: categories.map((cat) {
+                  final isSelected = _pages[index].category == cat;
+                  return ChoiceChip(
+                    label: Text(cat),
+                    selected: isSelected,
+                    selectedColor: DS.indigo.withOpacity(0.3),
+                    backgroundColor: DS.bgCard2,
+                    labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.white54, fontSize: 12),
+                    onSelected: (_) {
+                      _setCategory(index, cat);
+                      Navigator.pop(context);
+                    },
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -418,7 +712,6 @@ class _ScannerScreenState extends State<ScannerScreen> {
     );
   }
 
-  // ✅ Modern capture buttons (floating action style)
   Widget _captureButtons() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
@@ -429,35 +722,30 @@ class _ScannerScreenState extends State<ScannerScreen> {
       child: Row(
         children: [
           Expanded(
-            child: _actionCard(
-              icon: Icons.photo_library_rounded,
-              label: 'Gallery',
-              color: DS.cyan,
-              onTap: _gallery,
-            ),
-          ),
+              child: _actionCard(
+                  icon: Icons.photo_library_rounded,
+                  label: 'Gallery',
+                  color: DS.cyan,
+                  onTap: _gallery)),
           const SizedBox(width: 12),
           Expanded(
-            child: _actionCard(
-              icon: Icons.camera_alt_rounded,
-              label: 'Scan',
-              color: DS.indigo,
-              onTap: _camera,
-              primary: true,
-            ),
-          ),
+              child: _actionCard(
+                  icon: Icons.camera_alt_rounded,
+                  label: 'Scan',
+                  color: DS.indigo,
+                  onTap: _autoDetectScan,
+                  primary: true)),
         ],
       ),
     );
   }
 
-  Widget _actionCard({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-    bool primary = false,
-  }) {
+  Widget _actionCard(
+      {required IconData icon,
+      required String label,
+      required Color color,
+      required VoidCallback onTap,
+      bool primary = false}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -475,7 +763,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
           children: [
             Icon(icon, color: primary ? Colors.white : color, size: 22),
             const SizedBox(width: 8),
-            Text(label, style: TextStyle(color: primary ? Colors.white : color, fontSize: 14, fontWeight: FontWeight.w600)),
+            Text(label,
+                style: TextStyle(color: primary ? Colors.white : color, fontSize: 14, fontWeight: FontWeight.w600)),
           ],
         ),
       ),
@@ -498,7 +787,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
           children: [
             Icon(Icons.invert_colors_rounded, size: 14, color: active ? DS.indigo : Colors.white38),
             const SizedBox(width: 6),
-            Text(label, style: TextStyle(color: active ? DS.indigo : Colors.white38, fontSize: 11, fontWeight: FontWeight.w600)),
+            Text(label,
+                style: TextStyle(color: active ? DS.indigo : Colors.white38, fontSize: 11, fontWeight: FontWeight.w600)),
           ],
         ),
       ),
@@ -506,9 +796,3 @@ class _ScannerScreenState extends State<ScannerScreen> {
   }
 }
 
-class _Page {
-  final String name;
-  final Uint8List bytes;
-  int n;
-  _Page({required this.name, required this.bytes, required this.n});
-}

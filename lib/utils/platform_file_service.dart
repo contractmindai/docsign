@@ -50,12 +50,6 @@ class PlatformFileService {
     return null; // no caching on mobile
   }
 
-  static void clearCache(String path) {
-    if (kIsWeb) {
-      final bytes = _webCache.remove(path);
-      if (bytes != null) _webCacheTotalBytes -= bytes.length;
-    }
-  }
 
   // ── Pick files ─────────────────────────────────────────────────────────────
 
@@ -170,6 +164,18 @@ class PlatformFileService {
     } else {
       await ioDelete(path);
     }
+  }
+
+static Future<void> clearCache() async {
+  if (!kIsWeb) return;
+  _webCache.clear();
+  _webCacheTotalBytes = 0;
+}
+
+  static void clearCacheEntry(String path) {
+    if (!kIsWeb) return;
+    final bytes = _webCache.remove(path);
+    if (bytes != null) _webCacheTotalBytes -= bytes.length;
   }
 }
 

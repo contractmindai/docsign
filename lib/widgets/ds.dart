@@ -86,7 +86,7 @@ class DS {
   // ── Cards: varied radii, layered shadows ───────────────────────────────
   static final BoxDecoration card = BoxDecoration(
     color: bgCard,
-    borderRadius: BorderRadius.circular(18), // not 20, not 16 – optically chosen
+    borderRadius: BorderRadius.circular(18),
     border: Border.all(color: Colors.white.withOpacity(0.04)),
     boxShadow: [
       BoxShadow(
@@ -234,10 +234,10 @@ class _PrimaryButtonState extends State<PrimaryButton>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(width: DS.spaceXXS), // 4 – tiny left buffer
+              const SizedBox(width: DS.spaceXXS),
               if (widget.icon != null) ...[
                 Icon(widget.icon, color: Colors.white, size: 18),
-                const SizedBox(width: DS.spaceS), // 10 – irregular gap
+                const SizedBox(width: DS.spaceS),
               ],
               Expanded(
                 child: Text(
@@ -251,7 +251,7 @@ class _PrimaryButtonState extends State<PrimaryButton>
                   ),
                 ),
               ),
-              const SizedBox(width: DS.spaceXS), // 7 – tiny right buffer
+              const SizedBox(width: DS.spaceXS),
             ],
           ),
         ),
@@ -326,7 +326,7 @@ class _GhostButtonState extends State<GhostButton> with SingleTickerProviderStat
                 mainAxisAlignment: MainAxisAlignment.center, children: [
               if (widget.icon != null) ...[
                 Icon(widget.icon, color: c, size: 15),
-                const SizedBox(width: DS.spaceS), // 10
+                const SizedBox(width: DS.spaceS),
               ],
               Text(widget.label, style: TextStyle(
                   color: c, fontSize: 13, fontWeight: FontWeight.w500)),
@@ -377,7 +377,7 @@ class DSBadge extends StatelessWidget {
   const DSBadge({super.key, required this.text, required this.color, this.icon});
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), // 10,5 – not round numbers
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
     decoration: BoxDecoration(
       color: color.withOpacity(0.12),
       borderRadius: BorderRadius.circular(999),
@@ -395,12 +395,12 @@ class DSSectionHeader extends StatelessWidget {
   const DSSectionHeader({super.key, required this.title, this.subtitle, this.action});
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(0, 0, 0, 20), // 20 is deliberately outside the sequence
+    padding: const EdgeInsets.fromLTRB(0, 0, 0, 20),
     child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(title, style: DS.heading(size: 22)),
         if (subtitle != null) ...[
-          const SizedBox(height: 6), // 6 is not in the spacing list – irregular
+          const SizedBox(height: 6),
           Text(subtitle!, style: DS.body(size: 13, color: DS.mist)),
         ],
       ])),
@@ -413,7 +413,7 @@ class DSCard extends StatefulWidget {
   final Widget child; final VoidCallback? onTap;
   final EdgeInsetsGeometry padding;
   const DSCard({super.key, required this.child, this.onTap,
-      this.padding = const EdgeInsets.all(20)}); // 20 – optically chosen
+      this.padding = const EdgeInsets.all(20)});
   @override State<DSCard> createState() => _DSCardState();
 }
 class _DSCardState extends State<DSCard> {
@@ -446,7 +446,6 @@ class SurfaceNoise extends StatelessWidget {
 }
 
 /// Gradient text – use ONLY for onboarding hero or premium headers
-/// ⚠️ Overuse makes the app feel like a landing page. Be intentional.
 class GradientText extends StatelessWidget {
   final String text; final TextStyle? style;
   final List<Color> colors;
@@ -472,8 +471,8 @@ class DSTabBar extends StatelessWidget {
         onTap: () => onTap(e.key),
         child: AnimatedContainer(
           duration: DS.hoverDuration,
-          margin: const EdgeInsets.only(right: 8), // 8 – irregular
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), // 16,8
+          margin: const EdgeInsets.only(right: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
             color: active ? DS.indigo : DS.bgCard2,
             borderRadius: BorderRadius.circular(999),
@@ -500,4 +499,65 @@ class DSKeyHint extends StatelessWidget {
       color: DS.bgCard2, borderRadius: BorderRadius.circular(6),
       border: Border.all(color: DS.separator)),
     child: Text(key_, style: DS.mono(size: 10)));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADDED: DSTopBar – used in HomeScreen for web/mobile templates
+// ─────────────────────────────────────────────────────────────────────────────
+class DSTopBar extends StatelessWidget implements PreferredSizeWidget {
+  final String title;
+  final bool showBackButton;
+  final List<Widget>? actions;
+  final VoidCallback? onBackPressed;
+  final Color? backgroundColor;
+
+  const DSTopBar({
+    super.key,
+    required this.title,
+    this.showBackButton = false,
+    this.actions,
+    this.onBackPressed,
+    this.backgroundColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: backgroundColor ?? DS.bgCard,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              if (showBackButton)
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: DSIconBtn(
+                    icon: Icons.arrow_back_ios_new_rounded,
+                    tooltip: 'Back',
+                    onTap: onBackPressed ?? () => Navigator.pop(context),
+                    color: DS.indigo,
+                    size: 20,
+                  ),
+                ),
+              Expanded(
+                child: Text(
+                  title,
+                  style: DS.title(size: 18).copyWith(
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.3,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (actions != null) ...actions!,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Size get preferredSize => const Size.fromHeight(56);
 }

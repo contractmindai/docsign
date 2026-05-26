@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -88,7 +90,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   final TransformationController _transformationController = TransformationController();
 
   bool get _annotating => _tool != AnnotationTool.view || _pendingSig != null;
-  Uint8List? get _sourceBytes => widget.preloadedBytes ?? PlatformFileService.getCached(widget.filePath);
+  bool get _isIOS => Theme.of(context).platform == TargetPlatform.iOS;
+
+  // ── Mutable source bytes – can be updated after tools return ──
+  Uint8List? _currentSourceBytes;
 
   // ----------------------------------------------------------------------
   // Device fingerprint (persistent, offline)
@@ -106,6 +111,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   @override
   void initState() {
     super.initState();
+    _currentSourceBytes = widget.preloadedBytes ?? PlatformFileService.getCached(widget.filePath);
     _openDoc();
     _loadProfile();
     _scroll.addListener(_trackPage);
@@ -128,7 +134,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   Future<void> _openDoc({String? password}) async {
     if (mounted) setState(() { _docLoading = true; _docError = null; });
     try {
-      final doc = await PdfLoader.openForViewing(path: widget.filePath, bytes: _sourceBytes, password: password);
+      final doc = await PdfLoader.openForViewing(path: widget.filePath, bytes: _currentSourceBytes, password: password);
       if (mounted) setState(() { _doc = doc; _pageCount = doc.pages.length; _docLoading = false; });
       await _loadSidecar();
       _detectExpiry();
@@ -211,7 +217,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   Future<void> _loadProfile() async { final pr = await SignerProfileService.loadProfile(); if (mounted) setState(() => _profile = pr); }
 
   Future<void> _detectExpiry() async {
-    try { final bytes = _sourceBytes ?? await PlatformFileService.readBytes(widget.filePath) ?? Uint8List(0); if (bytes.isEmpty) return; final raw = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127).take(60000)); final found = ExpiryDetector.detect(raw, 0); if (found.isNotEmpty && mounted) setState(() { _expiries = found; _showExpiryBanner = true; }); } catch (_) {}
+    try { final bytes = _currentSourceBytes ?? await PlatformFileService.readBytes(widget.filePath) ?? Uint8List(0); if (bytes.isEmpty) return; final raw = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127).take(60000)); final found = ExpiryDetector.detect(raw, 0); if (found.isNotEmpty && mounted) setState(() { _expiries = found; _showExpiryBanner = true; }); } catch (_) {}
   }
 
   void _markMutated() {
@@ -271,33 +277,136 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   Map<int, int> get _annCounts { final m = <int, int>{}; for (int i = 0; i < _pageCount; i++) { final c = (_rects[i]?.length ?? 0) + (_notes[i]?.length ?? 0) + (_sigs[i]?.length ?? 0) + (_stamps[i]?.length ?? 0) + (_redacts[i]?.length ?? 0) + (_clauses[i]?.length ?? 0) + (_textEdits[i]?.length ?? 0) + (_ink[i] != null ? 1 : 0); if (c > 0) m[i] = c; } return m; }
   void _undo() { if (_undoStack.isEmpty) return; _undoStack.removeLast()(); _markMutated(); }
 
-  Future<String?> _buildPdf() => PdfSaveService.save(sourcePath: widget.filePath, pageCount: _pageCount, rectAnnotations: _rects, inkAnnotations: _ink, stickyNotes: _notes, signatures: _sigs, textStamps: _stamps, redactions: _redacts, bookmarks: _clauses, textEdits: _textEdits, slots: _slots, signerProfile: _profile, signatureIps: _signatureIps, sourceBytes: _sourceBytes);
+  Future<String?> _buildPdf() => PdfSaveService.save(
+    sourcePath: widget.filePath,
+    pageCount: _pageCount,
+    rectAnnotations: _rects,
+    inkAnnotations: _ink,
+    stickyNotes: _notes,
+    signatures: _sigs,
+    textStamps: _stamps,
+    redactions: _redacts,
+    bookmarks: _clauses,
+    textEdits: _textEdits,
+    slots: _slots,
+    signerProfile: _profile,
+    signatureIps: _signatureIps,
+    sourceBytes: _currentSourceBytes,   // ← uses current bytes
+  );
 
-  // ------------------ GUARDED SAVE/SHARE/EMAIL ------------------
+  // ------------------ OPEN TOOLS & RELOAD AFTER RESULT ------------------
+  Future<void> _openTools() async {
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PdfToolsScreen(
+          filePath: widget.filePath,
+          fileBytes: _currentSourceBytes,
+          document: _doc,
+        ),
+      ),
+    );
+
+    if (result != null && mounted) {
+      final String newPath = result['path'] as String;
+      final Uint8List? newBytes = result['bytes'] as Uint8List?;
+      await _reloadWithNewFile(newPath, newBytes);
+    }
+  }
+
+  Future<void> _reloadWithNewFile(String path, Uint8List? bytes) async {
+    setState(() {
+      _docLoading = true;
+      _doc?.dispose();
+      _doc = null;
+      _pageCount = 0;
+      _currentSourceBytes = bytes;   // update the source bytes
+      // Clear annotations – new document has none
+      _rects.clear();
+      _ink.clear();
+      _notes.clear();
+      _sigs.clear();
+      _stamps.clear();
+      _redacts.clear();
+      _clauses.clear();
+      _textEdits.clear();
+      _undoStack.clear();
+    });
+
+    try {
+      // Use the new path but with the new bytes.
+      final doc = await PdfLoader.openForViewing(path: path, bytes: bytes);
+      if (mounted) setState(() {
+        _doc = doc;
+        _pageCount = doc.pages.length;
+        _docLoading = false;
+        _visPage = 1;
+      });
+    } catch (e) {
+      if (mounted) {
+        _snack('Failed to reload: $e', err: true);
+        setState(() => _docLoading = false);
+      }
+    }
+  }
+
+  // ------------------ SAVE & SHARE with GO-HOME DIALOG ------------------
   Future<void> _save() async {
     if (_isSaving || _docLoading || _doc == null) return;
+
+    // 1. Ask for file name
+    final defaultName = p.basenameWithoutExtension(widget.filePath);
+    final desiredName = await _askFileName(defaultName: defaultName);
+    if (desiredName == null || desiredName.isEmpty) return;   // user cancelled
+
+    final safeName = desiredName.endsWith('.pdf') ? desiredName : '$desiredName.pdf';
+
+    // 2. Optional: choose a destination folder (mobile/desktop only)
     String? customDir;
-    if (!kIsWeb) customDir = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Choose save location');
+    if (!kIsWeb) {
+      customDir = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Choose save location',
+      );
+    }
+
     setState(() => _isSaving = true);
     try {
-      final path = await _buildPdf();
-      if (path == null) throw Exception('Build failed');
-      if (customDir != null && !kIsWeb) {
-        final dest = '$customDir/${p.basename(path)}';
-        final bytes = await PlatformFileService.readBytes(path);
-        if (bytes != null) await PlatformFileService.writeBytes(dest, bytes);
-        _snack('Saved to $customDir', duration: 4);
-      } else if (kIsWeb) {
-        final bytes = PlatformFileService.getCached(path);
-        if (bytes != null) {
-          downloadFile(p.basename(path), bytes);
-          _snack('Downloaded ${p.basename(path)}');
-        }
+      // 3. Get the PDF bytes – use the current ones if available, else rebuild
+      Uint8List? bytes;
+
+      if (_currentSourceBytes != null) {
+        // Use the document exactly as it is displayed (rotated, watermarked, etc.)
+        bytes = _currentSourceBytes;
       } else {
-        _snack('Saved ${p.basename(path)}');
+        // Fallback: rebuild from annotations (rarely needed after tools)
+        final sourcePath = await _buildPdf();
+        if (sourcePath != null) {
+          bytes = PlatformFileService.getCached(sourcePath) ??
+              (!kIsWeb ? await File(sourcePath).readAsBytes() : null);
+        }
       }
+
+      if (bytes == null) throw Exception('Could not read PDF bytes');
+
+      // 4. Write the bytes to the chosen location
+      if (customDir != null && !kIsWeb) {
+        final dest = File('$customDir/$safeName');
+        await dest.writeAsBytes(bytes);
+        _snack('Saved to ${dest.path}', duration: 4);
+      } else if (kIsWeb) {
+        downloadFile(safeName, bytes);
+        _snack('Downloaded $safeName');
+      } else {
+        final defaultDir = await getApplicationDocumentsDirectory();
+        final dest = File('${defaultDir.path}/$safeName');
+        await dest.writeAsBytes(bytes);
+        _snack('Saved as $safeName');
+      }
+
+      if (mounted) _showPostActionDialog();
     } catch (e) {
-      if (mounted) _snack('Save failed: $e', err: true);
+      if (mounted) _snack('Save failed: $e', err: true, duration: 5);
+      debugPrint('Save error: $e');
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -305,15 +414,36 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
   Future<void> _share() async {
     if (_isSaving || _docLoading || _doc == null) return;
+
+    final defaultName = p.basenameWithoutExtension(widget.filePath);
+    final desiredName = await _askFileName(defaultName: defaultName);
+    if (desiredName == null || desiredName.isEmpty) return;
+
+    final safeName = desiredName.endsWith('.pdf') ? desiredName : '$desiredName.pdf';
+
     setState(() => _isSaving = true);
     try {
-      final path = await _buildPdf();
-      if (path == null) throw Exception('Build failed');
+      final sourcePath = await _buildPdf();
+      if (sourcePath == null) throw Exception('Build failed');
+
+      final sourceBytes = PlatformFileService.getCached(sourcePath) ??
+          (!kIsWeb ? await File(sourcePath).readAsBytes() : null);
+
+      if (sourceBytes == null) throw Exception('No bytes');
+
       if (kIsWeb) {
-        final bytes = PlatformFileService.getCached(path);
-        if (bytes != null) downloadFile(p.basename(path), bytes);
+        downloadFile(safeName, sourceBytes);
+        if (mounted) _showPostActionDialog();
       } else {
-        await Share.shareXFiles([XFile(path)], subject: p.basename(path));
+        // Copy to temp with the new name before sharing
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File('${tempDir.path}/$safeName');
+        await tempFile.writeAsBytes(sourceBytes);
+        await Share.shareXFiles(
+          [XFile(tempFile.path, mimeType: 'application/pdf')],
+          subject: safeName,
+        );
+        if (mounted) _showPostActionDialog();
       }
     } catch (e) {
       if (mounted) _snack('Share failed: $e', err: true);
@@ -352,42 +482,74 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
       duration: Duration(seconds: duration),
     ));
   }
+
+  void _showPostActionDialog([String? message]) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: DS.bgCard,
+        title: const Text('Done', style: TextStyle(color: Colors.white)),
+        content: Text(
+          message ?? 'Do you want to open another document?',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('No', style: TextStyle(color: Colors.white54)),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);                // close dialog
+              Navigator.of(context).popUntil((route) => route.isFirst); // go to home
+            },
+            style: FilledButton.styleFrom(backgroundColor: DS.indigo),
+            child: const Text('Yes'),
+          ),
+        ],
+      ),
+    );
+  }
   
-  void _openTools() {
-    Navigator.push(context, MaterialPageRoute(
-      builder: (_) => PdfToolsScreen(
-        filePath: widget.filePath,
-        fileBytes: _sourceBytes,
-        document: _doc,
-      )));
+  Future<String?> _askFileName({String? defaultName}) async {
+    final controller = TextEditingController(
+      text: defaultName ?? 'document',
+    );
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: DS.bgCard,
+        title: const Text('Save as', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Enter file name',
+            filled: true,
+            fillColor: DS.bgCard2,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            style: FilledButton.styleFrom(backgroundColor: DS.indigo),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
   }
-
-  Future<void> _emailSignedPdf() async {
-    if (_isSaving || _docLoading || _doc == null) return;
-    setState(() => _isSaving = true);
-    try {
-      final path = await _buildPdf();
-      if (path == null) throw Exception('Build failed');
-      final name = p.basenameWithoutExtension(widget.filePath);
-      final subject = 'Signed: $name';
-      final body = 'Please find the signed document attached.\n\nSigned via DocSign — Free PDF Tools\nhttps://pdf.contractmind.ai';
-      if (kIsWeb) {
-        final uri = Uri(scheme: 'mailto', queryParameters: {'subject': subject, 'body': '$body\n\n(Attach the downloaded PDF manually)'});
-        if (await canLaunchUrl(uri)) await launchUrl(uri);
-      } else {
-        await Share.shareXFiles([XFile(path, mimeType: 'application/pdf')], subject: subject, text: body);
-      }
-    } catch (e) {
-      if (mounted) _snack('Email failed: $e', err: true);
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
-  bool get _isIOS => Theme.of(context).platform == TargetPlatform.iOS;
-
   // ----------------------------------------------------------------------
-  // RESPONSIVE PAGE LIST (dynamic width) - OPTIMIZED FOR 390+ PAGES
+  // RESPONSIVE PAGE LIST (dynamic width)
   // ----------------------------------------------------------------------
   Widget _pageList() {
     return LayoutBuilder(
@@ -407,27 +569,22 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
         return ListView.builder(
           controller: _scroll,
-          // 🔥 PERFORMANCE: prevent keeping all pages in memory
           addAutomaticKeepAlives: false,
-          // 🔥 PERFORMANCE: only pre-render ~2 screens ahead
           cacheExtent: MediaQuery.of(context).size.height * 2,
           physics: _isIOS
               ? const BouncingScrollPhysics()
               : (_annotating ? const NeverScrollableScrollPhysics() : const BouncingScrollPhysics()),
-          padding: EdgeInsets.symmetric(vertical: isMobile ? 4 : 12), // small padding on mobile
+          padding: EdgeInsets.symmetric(vertical: isMobile ? 4 : 12),
           itemCount: _pageCount,
           itemBuilder: (_, i) {
-            // 🔥 PERFORMANCE: isolate each page's repaint
             return RepaintBoundary(
               child: Center(
                 child: Container(
                   width: availW,
-                  // 🔥 FIX: always show separation (margin + shadow)
                   margin: EdgeInsets.only(bottom: isMobile ? 8 : 12),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(isMobile ? 4 : 8),
-                    // shadow on both mobile and desktop (lighter on mobile)
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(isMobile ? 0.04 : 0.08),
@@ -529,7 +686,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     );
   }
 
-  // Floating zoom buttons (bottom‑right, no overlap with annotation bar)
+  // Floating zoom buttons
   Widget _floatingZoomButtons() {
     if (_readMode || _annotating) return const SizedBox();
     return Positioned(

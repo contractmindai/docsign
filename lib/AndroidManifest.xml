@@ -1,10 +1,13 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Permissions -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32"/>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.contractmind.docsign">   <!-- Use your actual package name -->
 
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="29"/>
+    <!-- Permissions -->
+
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"
+        tools:remove="android:maxSdkVersion" />
 
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
 
@@ -14,30 +17,25 @@
 
     <uses-permission android:name="android.permission.INTERNET"/>
 
-    <!-- Required for Android 11+ file opening -->
+    <!-- Keep queries as you have them -->
     <queries>
-
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <category android:name="android.intent.category.DEFAULT"/>
             <data android:mimeType="application/pdf"/>
         </intent>
-
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:mimeType="image/*"/>
         </intent>
-
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:mimeType="application/msword"/>
         </intent>
-
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"/>
         </intent>
-
     </queries>
 
     <application
@@ -60,13 +58,11 @@
             <meta-data android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme"/>
 
-            <!-- App launcher -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
-            <!-- ✅ Open PDF files with DocSign -->
             <intent-filter android:label="Open with DocSign">
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
@@ -74,7 +70,6 @@
                 <data android:mimeType="application/pdf"/>
             </intent-filter>
 
-            <!-- Open from file manager (any scheme) -->
             <intent-filter android:label="Open with DocSign">
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
