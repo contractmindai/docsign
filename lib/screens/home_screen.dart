@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import 'package:docx_file_viewer/docx_file_viewer.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
 import 'package:universal_file_viewer/universal_file_viewer.dart' hide FileType;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../screens/template_screen.dart';
 import '../services/pdf_loader.dart';
@@ -22,6 +24,10 @@ import 'pdf_tools_screen.dart';
 import 'pdf_viewer_screen.dart';
 import 'scanner_screen.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HomeScreen – original version + persistent recent files (no animations)
+// ─────────────────────────────────────────────────────────────────────────────
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -30,7 +36,43 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
-  final List<_RecentEntry> _recentPdfs = [];
+  List<_RecentEntry> _recentPdfs = [];
+  static const String _kRecentFilesKey = 'recent_files_v1';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRecentFiles();
+  }
+
+  Future<void> _saveRecentFiles() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = _recentPdfs.map((e) => {
+      'displayName': e.displayName,
+      'virtualPath': e.virtualPath,
+    }).toList();
+    await prefs.setString(_kRecentFilesKey, jsonEncode(list));
+  }
+
+  Future<void> _loadRecentFiles() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? data = prefs.getString(_kRecentFilesKey);
+    if (data == null) return;
+    try {
+      final List<dynamic> list = jsonDecode(data);
+      final loaded = <_RecentEntry>[];
+      for (final item in list) {
+        loaded.add(_RecentEntry(
+          displayName: item['displayName'],
+          virtualPath: item['virtualPath'],
+          bytes: null,
+        ));
+      }
+      setState(() {
+        _recentPdfs = loaded;
+      });
+    } catch (_) {}
+  }
 
   Future<void> _pickPdf() async {
     try {
@@ -48,17 +90,30 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openPdf(String path, {Uint8List? bytes}) {
     Navigator.push(
-        context,
-        MaterialPageRoute(
-            builder: (_) =>
-                PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
+      context,
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => PdfViewerScreen(filePath: path, preloadedBytes: bytes),
+        transitionsBuilder: (_, animation, __, child) => FadeTransition(opacity: animation, child: child),
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
   }
 
-  void _addRecent(_RecentEntry e) => setState(() {
-        _recentPdfs.removeWhere((r) => r.virtualPath == e.virtualPath);
-        _recentPdfs.insert(0, e);
-        if (_recentPdfs.length > 20) _recentPdfs.removeLast();
-      });
+  void _addRecent(_RecentEntry e) {
+    setState(() {
+      _recentPdfs.removeWhere((r) => r.virtualPath == e.virtualPath);
+      _recentPdfs.insert(0, e);
+      if (_recentPdfs.length > 20) _recentPdfs.removeLast();
+    });
+    _saveRecentFiles();
+  }
+
+  void _removeRecent(_RecentEntry e) {
+    setState(() {
+      _recentPdfs.remove(e);
+    });
+    _saveRecentFiles();
+  }
 
   void _snack(String msg, {bool err = false}) {
     if (!mounted) return;
@@ -78,7 +133,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return kIsWeb ? _buildWebLayout() : _buildMobileLayout();
   }
 
-  // ── Web layout (light theme) ──────────────────────────────────────────────
+  // ── Web layout (original) ─────────────────────────────────────────────────
   Widget _buildWebLayout() {
     return Scaffold(
       backgroundColor: DS.bg,
@@ -92,7 +147,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 24),
-
                   // Logo
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -130,27 +184,24 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 20),
-
                   // Open PDF Button
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
+                    child: ScaleTap(
                       onTap: _pickPdf,
                       child: Container(
                         height: 44,
-                        padding: const EdgeInsets.symmetric(horizontal: 10),   // reduced padding
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
                         decoration: BoxDecoration(
                           color: DS.indigo.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
                           border: Border.all(color: DS.indigo.withOpacity(0.22)),
                         ),
                         child: Row(
                           children: [
                             const Icon(Icons.upload_file_rounded, color: DS.indigo, size: 20),
-                            const SizedBox(width: 8),   // smaller gap
+                            const SizedBox(width: 8),
                             Text(
                               'Open PDF',
                               style: GoogleFonts.inter(
@@ -164,9 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 8),
-
                   // Sidebar items
                   _SidebarItem(
                     icon: Icons.home_rounded,
@@ -187,7 +236,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     onTap: () => setState(() => _tab = 2),
                   ),
                   const SizedBox(height: 20),
-
                   _SidebarItem(
                     icon: Icons.document_scanner_rounded,
                     label: 'Scanner',
@@ -247,8 +295,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return _WebHome(
           recentPdfs: _recentPdfs,
           onOpenPdf: _pickPdf,
-          onOpenRecent: (e) =>
-              _openPdf(e.virtualPath, bytes: e.bytes),
+          onOpenRecent: (e) => _openPdf(e.virtualPath, bytes: e.bytes),
           onRemove: (e) => _confirmRemoveRecent(e),
         );
       case 1:
@@ -269,6 +316,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: DS.bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusMedium)),
         title: const Text('Remove from recents?',
             style: TextStyle(color: Colors.white)),
         content: const Text(
@@ -288,12 +336,12 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     if (confirmed == true) {
-      setState(() => _recentPdfs.remove(entry));
+      _removeRecent(entry);
       _snack('Removed from recents');
     }
   }
 
-  // ── Mobile layout ─────────────────────────────────────────────────────────
+  // ── Mobile layout (original) ──────────────────────────────────────────────
   Widget _buildMobileLayout() {
     final tabs = [
       (Icons.house_rounded, 'Home'),
@@ -311,8 +359,7 @@ class _HomeScreenState extends State<HomeScreen> {
           onNewDoc: () => DocumentEditorScreen.openNew(context),
           onCreatePdf: () => CreatePdfScreen.show(context),
           recentPdfs: _recentPdfs,
-          onOpenRecent: (e) =>
-              _openPdf(e.virtualPath, bytes: e.bytes),
+          onOpenRecent: (e) => _openPdf(e.virtualPath, bytes: e.bytes),
           onRemove: (e) => _confirmRemoveRecent(e),
         ),
         _MobileRecents(
@@ -347,7 +394,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ========== SIDEBAR ITEM ==========
+// ========== SIDEBAR ITEM (unchanged) ==========
 class _SidebarItem extends StatefulWidget {
   final IconData icon;
   final String label;
@@ -376,7 +423,7 @@ class _SidebarItemState extends State<_SidebarItem> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 130),
+          duration: AppTheme.shortAnim,
           margin: const EdgeInsets.fromLTRB(10, 1, 10, 1),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
           decoration: BoxDecoration(
@@ -385,7 +432,7 @@ class _SidebarItemState extends State<_SidebarItem> {
                 : _hover
                     ? DS.bgHover
                     : Colors.transparent,
-            borderRadius: BorderRadius.circular(9),
+            borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
             border: Border.all(
                 color: widget.active
                     ? DS.indigo.withOpacity(0.25)
@@ -411,7 +458,7 @@ class _SidebarItemState extends State<_SidebarItem> {
   }
 }
 
-// ========== WEB HOME ==========
+// ========== WEB HOME (original) ==========
 class _WebHome extends StatelessWidget {
   final List<_RecentEntry> recentPdfs;
   final VoidCallback onOpenPdf;
@@ -524,7 +571,7 @@ class _WebHome extends StatelessWidget {
       );
 }
 
-// ========== ANIMATED DROP ZONE ==========
+// ========== ANIMATED DROP ZONE (original) ==========
 class _AnimatedDropZone extends StatefulWidget {
   const _AnimatedDropZone();
   @override
@@ -569,7 +616,7 @@ class _AnimatedDropZoneState extends State<_AnimatedDropZone>
             height: _hover ? 190 : 170,
             decoration: BoxDecoration(
               color: _hover ? DS.indigo.withOpacity(0.06) : DS.bgCard,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
               border: Border.all(
                   color: _hover ? DS.indigo : DS.separator, width: _hover ? 2 : 1),
               boxShadow: _hover
@@ -614,7 +661,7 @@ class _AnimatedDropZoneState extends State<_AnimatedDropZone>
       );
 }
 
-// ========== QUICK ACTION ==========
+// ========== QUICK ACTION (original) ==========
 class _QuickAction extends StatefulWidget {
   final IconData icon;
   final String label;
@@ -628,19 +675,19 @@ class _QuickAction extends StatefulWidget {
 class _QuickActionState extends State<_QuickAction> {
   bool _hover = false;
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => ScaleTap(
         onTap: widget.onTap,
         child: MouseRegion(
           onEnter: (_) => setState(() => _hover = true),
           onExit: (_) => setState(() => _hover = false),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 130),
+            duration: AppTheme.shortAnim,
             width: 140,
             height: 72,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: _hover ? DS.bgHover : DS.bgCard,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
               border: Border.all(
                   color: _hover ? widget.color.withOpacity(0.3) : DS.separator,
                   width: 0.8),
@@ -662,7 +709,7 @@ class _QuickActionState extends State<_QuickAction> {
       );
 }
 
-// ========== FILE ROW ==========
+// ========== FILE ROW (original) ==========
 class _FileRow extends StatefulWidget {
   final _RecentEntry entry;
   final VoidCallback onTap, onRemove;
@@ -678,17 +725,18 @@ class _FileRowState extends State<_FileRow> {
   Widget build(BuildContext context) => MouseRegion(
         onEnter: (_) => setState(() => _hover = true),
         onExit: (_) => setState(() => _hover = false),
-        child: GestureDetector(
+        child: ScaleTap(
           onTap: widget.onTap,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 130),
+            duration: AppTheme.shortAnim,
             margin: const EdgeInsets.only(bottom: 4),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
               color: _hover ? DS.bgHover : DS.bgCard,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
               border: Border.all(
                   color: _hover ? DS.separatorLight : DS.separator, width: 0.5),
+              boxShadow: _hover ? AppTheme.cardShadowHover : AppTheme.cardShadow,
             ),
             child: Row(
               children: [
@@ -724,7 +772,7 @@ class _FileRowState extends State<_FileRow> {
       );
 }
 
-// ========== WEB RECENTS ==========
+// ========== WEB RECENTS (original) ==========
 class _WebRecents extends StatelessWidget {
   final List<_RecentEntry> pdfs;
   final ValueChanged<_RecentEntry> onOpen, onRemove;
@@ -761,7 +809,7 @@ class _WebRecents extends StatelessWidget {
           });
 }
 
-// ========== WEB TEMPLATES ==========
+// ========== WEB TEMPLATES (original) ==========
 class _WebTemplates extends StatelessWidget {
   const _WebTemplates();
   @override
@@ -776,7 +824,7 @@ class _WebTemplates extends StatelessWidget {
                 DSSectionHeader(
                     title: 'Templates',
                     subtitle: 'Fill in the form and generate a PDF instantly'),
-                SizedBox(height: 8),
+                const SizedBox(height: 8),
               ],
             ),
           ),
@@ -785,7 +833,7 @@ class _WebTemplates extends StatelessWidget {
       );
 }
 
-// ========== MOBILE HOME ==========
+// ========== MOBILE HOME (original) ==========
 class _MobileHome extends StatelessWidget {
   final VoidCallback onOpenPdf, onScan, onNewDoc, onCreatePdf;
   final List<_RecentEntry> recentPdfs;
@@ -885,8 +933,14 @@ class _MobileHome extends StatelessWidget {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.inbox_rounded,
-                            size: 48, color: DS.textMuted),
+                        TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0.9, end: 1.0),
+                          duration: const Duration(seconds: 2),
+                          curve: Curves.easeInOut,
+                          builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
+                          child: Icon(Icons.inbox_rounded,
+                              size: 48, color: DS.textMuted),
+                        ),
                         const SizedBox(height: 16),
                         Text('No documents yet', style: DS.title(size: 16)),
                         const SizedBox(height: 6),
@@ -930,7 +984,7 @@ class _MobileHome extends StatelessWidget {
       );
 }
 
-// ========== MOBILE ACTION ==========
+// ========== MOBILE ACTION (original) ==========
 class _MobileAction extends StatefulWidget {
   final IconData icon;
   final String label;
@@ -972,7 +1026,7 @@ class _MobileActionState extends State<_MobileAction>
           child: Container(
             decoration: BoxDecoration(
               color: DS.bgCard,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
               border: Border.all(color: DS.separator, width: 0.5),
             ),
             child: Row(
@@ -996,19 +1050,24 @@ class _MobileActionState extends State<_MobileAction>
       );
 }
 
-// ========== MOBILE FILE ROW ==========
+// ========== MOBILE FILE ROW (original) ==========
 class _MobileFileRow extends StatelessWidget {
   final _RecentEntry entry;
   final VoidCallback onTap, onRemove;
   const _MobileFileRow(
       {required this.entry, required this.onTap, required this.onRemove});
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => ScaleTap(
         onTap: onTap,
         child: Container(
           margin: const EdgeInsets.fromLTRB(20, 0, 20, 6),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-          decoration: DS.card,
+          decoration: BoxDecoration(
+            color: DS.bgCard,
+            borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+            border: Border.all(color: DS.separator, width: 0.5),
+            boxShadow: AppTheme.cardShadow,
+          ),
           child: Row(
             children: [
               Container(
@@ -1045,7 +1104,7 @@ class _MobileFileRow extends StatelessWidget {
       );
 }
 
-// ========== MOBILE RECENTS ==========
+// ========== MOBILE RECENTS (original) ==========
 class _MobileRecents extends StatelessWidget {
   final List<_RecentEntry> pdfs;
   final ValueChanged<_RecentEntry> onOpen, onRemove;
@@ -1087,7 +1146,7 @@ class _MobileRecents extends StatelessWidget {
       );
 }
 
-// ========== MOBILE SETTINGS ==========
+// ========== MOBILE SETTINGS (original) ==========
 class _MobileSettings extends StatelessWidget {
   const _MobileSettings();
   @override
@@ -1124,7 +1183,7 @@ class _SettingRow extends StatelessWidget {
   final VoidCallback onTap;
   const _SettingRow(this.icon, this.color, this.title, this.sub, this.onTap);
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => ScaleTap(
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
@@ -1160,7 +1219,7 @@ class _SettingRow extends StatelessWidget {
       );
 }
 
-// ========== PREMIUM NAVIGATION BAR ==========
+// ========== PREMIUM NAVIGATION BAR (original) ==========
 class _PremiumNavBar extends StatelessWidget {
   final int current;
   final List<(IconData, String)> tabs;
@@ -1181,14 +1240,14 @@ class _PremiumNavBar extends StatelessWidget {
                 final active = e.key == current;
                 final (icon, label) = e.value;
                 return Expanded(
-                  child: GestureDetector(
+                  child: ScaleTap(
+                    scale: 0.92,
                     onTap: () => onTap(e.key),
-                    behavior: HitTestBehavior.opaque,
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
+                          duration: AppTheme.shortAnim,
                           width: 40,
                           height: 28,
                           decoration: BoxDecoration(
@@ -1220,7 +1279,7 @@ class _PremiumNavBar extends StatelessWidget {
       );
 }
 
-// ========== MOBILE FILE MANAGER ==========
+// ========== MOBILE FILE MANAGER (original) ==========
 class _MobileFileManager extends StatefulWidget {
   const _MobileFileManager();
   @override

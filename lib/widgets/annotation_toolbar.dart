@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../models/annotation.dart';
+import 'ds.dart';
 
 class AnnotationToolbar extends StatelessWidget {
   final AnnotationTool currentTool;
@@ -57,12 +58,19 @@ class AnnotationToolbar extends StatelessWidget {
         backgroundColor: const Color(0xFF1A1A2E),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Ink colour', style: GoogleFonts.inter(color: Colors.white, fontSize: 15)),
-        content: ColorPicker(pickerColor: currentColor, onColorChanged: (c) => temp = c,
-            enableAlpha: false, labelTypes: const [], pickerAreaHeightPercent: 0.65),
-        actions: [TextButton(
-          onPressed: () { onColorChanged(temp); Navigator.pop(ctx); },
-          child: const Text('Done', style: TextStyle(color: Color(0xFF6366F1))),
-        )],
+        content: _TextColorPicker(
+          initialColor: currentColor,
+          onColorChanged: (c) => temp = c,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              onColorChanged(temp);
+              Navigator.pop(ctx);
+            },
+            child: const Text('Done', style: TextStyle(color: Color(0xFF6366F1))),
+          ),
+        ],
       ),
     );
   }
@@ -73,8 +81,7 @@ class AnnotationToolbar extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF14142B),
         border: const Border(top: BorderSide(color: Colors.white10)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4),
-            blurRadius: 10, offset: const Offset(0, -2))],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 10, offset: const Offset(0, -2))],
       ),
       child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
         // ── Tool strip ────────────────────────────────────────────────────
@@ -104,14 +111,27 @@ class AnnotationToolbar extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           child: Row(children: [
-            // Colour dot
+            // Colour dot – now shows a preview with "A"
             GestureDetector(
               onTap: () => _pickColor(context),
-              child: Tooltip(message: 'Ink colour', child: Container(
-                width: 22, height: 22, margin: const EdgeInsets.symmetric(horizontal: 5),
-                decoration: BoxDecoration(color: currentColor, shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white54, width: 1.5)),
-              )),
+              child: Tooltip(
+                message: 'Ink colour',
+                child: Container(
+                  width: 22, height: 22, margin: const EdgeInsets.symmetric(horizontal: 5),
+                  decoration: BoxDecoration(color: currentColor, shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white54, width: 1.5)),
+                  child: Center(
+                    child: Text(
+                      'A',
+                      style: TextStyle(
+                        color: currentColor == Colors.white ? Colors.black : Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
             _A(icon: Icons.undo_rounded, tooltip: 'Undo', onTap: onUndo, color: Colors.white54),
             _div2(),
@@ -158,6 +178,7 @@ class AnnotationToolbar extends StatelessWidget {
   Widget _div2() => Container(width: 1, height: 20, margin: const EdgeInsets.symmetric(horizontal: 2), color: Colors.white12);
 }
 
+// Tool button with spring animation
 class _T extends StatelessWidget {
   final IconData icon; final String label;
   final AnnotationTool tool, ct;
@@ -168,7 +189,7 @@ class _T extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sel = ct == tool;
-    return GestureDetector(
+    return ScaleTap(
       onTap: () => onTap(tool),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
@@ -199,8 +220,136 @@ class _A extends StatelessWidget {
   final VoidCallback onTap; final Color color;
   const _A({required this.icon, required this.tooltip, required this.onTap, required this.color});
   @override
-  Widget build(BuildContext context) => IconButton(
-    icon: Icon(icon, color: color, size: 19), tooltip: tooltip,
-    onPressed: onTap, visualDensity: VisualDensity.compact,
+  Widget build(BuildContext context) => ScaleTap(
+    onTap: onTap,
+    child: IconButton(
+      icon: Icon(icon, color: color, size: 19),
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+    ),
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom text‑oriented color picker – shows "A" inside each swatch
+// ─────────────────────────────────────────────────────────────────────────────
+class _TextColorPicker extends StatefulWidget {
+  final Color initialColor;
+  final ValueChanged<Color> onColorChanged;
+
+  const _TextColorPicker({
+    required this.initialColor,
+    required this.onColorChanged,
+  });
+
+  @override
+  State<_TextColorPicker> createState() => _TextColorPickerState();
+}
+
+class _TextColorPickerState extends State<_TextColorPicker> {
+  late Color _selectedColor;
+
+  static const List<Color> _presetColors = [
+    Colors.black,
+    Colors.red,
+    Colors.blue,
+    Colors.green,
+    Colors.orange,
+    Colors.purple,
+    Color(0xFF6366F1), // DS.indigo
+    Colors.white,
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedColor = widget.initialColor;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          alignment: WrapAlignment.center,
+          children: _presetColors.map((color) {
+            final isSelected = _selectedColor == color;
+            return GestureDetector(
+              onTap: () {
+                setState(() => _selectedColor = color);
+                widget.onColorChanged(color);
+              },
+              child: AnimatedContainer(
+                duration: AppTheme.shortAnim,
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: isSelected ? Border.all(color: Colors.white, width: 2.5) : null,
+                  boxShadow: isSelected
+                      ? [BoxShadow(color: color.withOpacity(0.5), blurRadius: 8)]
+                      : null,
+                ),
+                child: Center(
+                  child: Text(
+                    'A',
+                    style: TextStyle(
+                      color: color == Colors.white ? Colors.black : Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 16),
+        // Optional: custom color picker
+        TextButton.icon(
+          onPressed: () => _showCustomPicker(context),
+          icon: const Icon(Icons.color_lens_rounded, size: 18),
+          label: const Text('Custom color'),
+          style: TextButton.styleFrom(foregroundColor: DS.indigo),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showCustomPicker(BuildContext context) async {
+    Color temp = _selectedColor;
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: DS.bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Custom colour', style: TextStyle(color: Colors.white)),
+        content: ColorPicker(
+          pickerColor: _selectedColor,
+          onColorChanged: (c) => temp = c,
+          enableAlpha: false,
+          labelTypes: const [],
+          pickerAreaHeightPercent: 0.65,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() => _selectedColor = temp);
+              widget.onColorChanged(temp);
+              Navigator.pop(context);
+            },
+            child: const Text('Apply', style: TextStyle(color: DS.indigo)),
+          ),
+        ],
+      ),
+    );
+  }
 }

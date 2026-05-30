@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:flutter/services.dart';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -85,6 +86,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
   bool _building = false;
   bool _batchMode = false;
   bool _extractText = false;
+  bool _hdMode = false; // HD mode toggle
 
   late SmartDocumentClassifier _classifier;
   late final TextRecognizer _ocrRecognizer; // dedicated for OCR
@@ -110,8 +112,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
     setState(() {
       _pages.clear();
     });
-    // Clear cached files (optional)
-     PlatformFileService.clearCache(); // implement if not exists (see below)
+    PlatformFileService.clearCache(); // implement if not exists (see below)
     _snack('Cleared all pages');
   }
 
@@ -153,11 +154,13 @@ class _ScannerScreenState extends State<ScannerScreen> {
   }
 
   // --------------------------------------------------------------------------
-  // Gallery pick
+  // Gallery pick (with HD mode support)
   // --------------------------------------------------------------------------
   Future<void> _gallery() async {
     try {
-      final files = await _picker.pickMultiImage(imageQuality: 92);
+      final files = await _picker.pickMultiImage(
+        imageQuality: _hdMode ? null : 92, // HD mode = original quality
+      );
       if (!mounted || files.isEmpty) return;
       for (final f in files) {
         final bytes = await f.readAsBytes();
@@ -220,7 +223,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
     final original = img.decodeImage(bytes);
     if (original == null) return bytes;
     final gray = img.grayscale(original);
-    return Uint8List.fromList(img.encodeJpg(gray, quality: 85));
+    final quality = _hdMode ? 95 : 85; // higher quality in HD mode
+    return Uint8List.fromList(img.encodeJpg(gray, quality: quality));
   }
 
   // --------------------------------------------------------------------------
@@ -228,6 +232,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
   // --------------------------------------------------------------------------
   Future<void> _performOCR(Uint8List imageBytes) async {
     if (!mounted) return;
+
+    // Show loading indicator
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -243,19 +249,31 @@ class _ScannerScreenState extends State<ScannerScreen> {
       await tempFile.delete();
 
       if (mounted) {
-        Navigator.pop(context);
+        Navigator.pop(context); // close loading
+
         if (recognized.text.isNotEmpty) {
+          final extractedText = recognized.text;
           await showDialog(
             context: context,
             builder: (_) => AlertDialog(
               title: const Text('Extracted Text'),
               content: SingleChildScrollView(
-                child: Text(recognized.text, style: const TextStyle(fontSize: 14)),
+                child: Text(extractedText, style: const TextStyle(fontSize: 14)),
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(_),
                   child: const Text('Close'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: extractedText));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Text copied to clipboard'), duration: Duration(seconds: 1)),
+                    );
+                    Navigator.pop(_);
+                  },
+                  child: const Text('Copy'),
                 ),
               ],
             ),
@@ -266,7 +284,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
       }
     } catch (e) {
       if (mounted) {
-        Navigator.pop(context);
+        Navigator.pop(context); // close loading
         _snack('OCR error: $e', err: true);
       }
     }
@@ -367,66 +385,66 @@ class _ScannerScreenState extends State<ScannerScreen> {
     );
   }
 
-Future<String?> _askFileName({String? defaultName}) async {
-  final controller = TextEditingController(text: defaultName ?? 'document');
-  return showDialog<String>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      backgroundColor: DS.bgCard,
-      title: Text('Save PDF as',
-          style: GoogleFonts.inter(color: Colors.white, fontSize: 16)),
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        style: const TextStyle(color: Colors.white),
-        decoration: InputDecoration(
-          hintText: 'Enter file name',
-          filled: true,
-          fillColor: DS.bgCard2,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+  Future<String?> _askFileName({String? defaultName}) async {
+    final controller = TextEditingController(text: defaultName ?? 'document');
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: DS.bgCard,
+        title: Text('Save PDF as', style: GoogleFonts.inter(color: Colors.white, fontSize: 16)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Enter file name',
+            filled: true,
+            fillColor: DS.bgCard2,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            style: FilledButton.styleFrom(backgroundColor: DS.indigo),
+            child: const Text('Create PDF'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-          style: FilledButton.styleFrom(backgroundColor: DS.indigo),
-          child: const Text('Create PDF'),
-        ),
-      ],
-    ),
-  );
-}
+    );
+  }
 
-Future<void> _addScannedPage(Uint8List bytes, String name) async {
-  // Apply grayscale if the user wants it
-  final finalBytes = _grayscale ? _applyGrayscale(bytes) : bytes;
+  Future<void> _addScannedPage(Uint8List bytes, String name) async {
+    // Apply grayscale if the user wants it
+    final finalBytes = _grayscale ? _applyGrayscale(bytes) : bytes;
 
-  if (finalBytes.isNotEmpty && mounted) {
-    // Classify the page
-    String category = 'Uncategorized';
-    try {
-      category = await _classifier.classify(finalBytes);
-    } catch (_) {}
+    if (finalBytes.isNotEmpty && mounted) {
+      // Classify the page
+      String category = 'Uncategorized';
+      try {
+        category = await _classifier.classify(finalBytes);
+      } catch (_) {}
 
-    setState(() {
-      _pages.add(_Page(
-        name: name,
-        bytes: finalBytes,
-        n: _pages.length + 1,
-        category: category,
-      ));
-    });
+      setState(() {
+        _pages.add(_Page(
+          name: name,
+          bytes: finalBytes,
+          n: _pages.length + 1,
+          category: category,
+        ));
+      });
 
-    // OCR if text extraction is on
-    if (_extractText && mounted) {
-      await _performOCR(finalBytes);
+      // OCR if text extraction is on
+      if (_extractText && mounted) {
+        await _performOCR(finalBytes);
+      }
     }
   }
-}
+
   // --------------------------------------------------------------------------
   // UI Builders
   // --------------------------------------------------------------------------
@@ -474,7 +492,7 @@ Future<void> _addScannedPage(Uint8List bytes, String name) async {
         ],
       ),
       body: _pages.isEmpty ? _emptyState() : _pageGrid(),
-      bottomNavigationBar: _pages.isEmpty ? _captureButtons() : null,
+      // Bottom buttons are now inside _pageGrid's bottom bar and move up using SafeArea
     );
   }
 
@@ -522,17 +540,19 @@ Future<void> _addScannedPage(Uint8List bytes, String name) async {
         return Column(
           children: [
             Row(
-                children: [
-                  const Icon(Icons.collections_rounded, color: DS.indigo, size: 18),
-                  const SizedBox(width: 8),
-                  const Spacer(),
-                  _chip('B&W', _grayscale, () => setState(() => _grayscale = !_grayscale)),
-                  const SizedBox(width: 8),
-                  _chip('Batch', _batchMode, () => setState(() => _batchMode = !_batchMode)),
-                  const SizedBox(width: 8),
-                  _chip('Extract Text', _extractText, () => setState(() => _extractText = !_extractText)),
-                ],
-              ),
+              children: [
+                const Icon(Icons.collections_rounded, color: DS.indigo, size: 18),
+                const SizedBox(width: 8),
+                const Spacer(),
+                _chip('B&W', _grayscale, () => setState(() => _grayscale = !_grayscale)),
+                const SizedBox(width: 8),
+                _chip('Batch', _batchMode, () => setState(() => _batchMode = !_batchMode)),
+                const SizedBox(width: 8),
+                _chip('HD', _hdMode, () => setState(() => _hdMode = !_hdMode)),
+                const SizedBox(width: 8),
+                _chip('Extract Text', _extractText, () => setState(() => _extractText = !_extractText)),
+              ],
+            ),
             const Divider(height: 1, color: DS.separator),
             Expanded(
               child: GridView.builder(
@@ -547,7 +567,34 @@ Future<void> _addScannedPage(Uint8List bytes, String name) async {
                 itemBuilder: (_, i) => _pageTile(i),
               ),
             ),
-            _captureButtons(),
+            // Bottom capture buttons – moved up using SafeArea
+            SafeArea(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                decoration: BoxDecoration(
+                  color: DS.bgCard,
+                  border: Border(top: BorderSide(color: DS.separator.withOpacity(0.5))),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                        child: _actionCard(
+                            icon: Icons.photo_library_rounded,
+                            label: 'Gallery',
+                            color: DS.cyan,
+                            onTap: _gallery)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        child: _actionCard(
+                            icon: Icons.camera_alt_rounded,
+                            label: 'Scan',
+                            color: DS.indigo,
+                            onTap: _autoDetectScan,
+                            primary: true)),
+                  ],
+                ),
+              ),
+            ),
           ],
         );
       },
@@ -613,15 +660,14 @@ Future<void> _addScannedPage(Uint8List bytes, String name) async {
                   ),
                 ),
               ),
-              // ── Delete button (top‑right) ──
+              // Delete button (top‑right)
               Positioned(top: 6, right: 6, child: _deleteBtn(() => _delete(i))),
-
-              // ── NEW: OCR button (top‑left) ──
+              // OCR button (top‑left)
               Positioned(
                 top: 6,
                 left: 6,
                 child: GestureDetector(
-                  onTap: () => _performOCR(pg.bytes),   // ← runs OCR for this page
+                  onTap: () => _performOCR(pg.bytes),
                   child: Container(
                     width: 26,
                     height: 26,
@@ -712,40 +758,13 @@ Future<void> _addScannedPage(Uint8List bytes, String name) async {
     );
   }
 
-  Widget _captureButtons() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
-      decoration: BoxDecoration(
-        color: DS.bgCard,
-        border: Border(top: BorderSide(color: DS.separator.withOpacity(0.5))),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-              child: _actionCard(
-                  icon: Icons.photo_library_rounded,
-                  label: 'Gallery',
-                  color: DS.cyan,
-                  onTap: _gallery)),
-          const SizedBox(width: 12),
-          Expanded(
-              child: _actionCard(
-                  icon: Icons.camera_alt_rounded,
-                  label: 'Scan',
-                  color: DS.indigo,
-                  onTap: _autoDetectScan,
-                  primary: true)),
-        ],
-      ),
-    );
-  }
-
-  Widget _actionCard(
-      {required IconData icon,
-      required String label,
-      required Color color,
-      required VoidCallback onTap,
-      bool primary = false}) {
+  Widget _actionCard({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+    bool primary = false,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -795,4 +814,3 @@ Future<void> _addScannedPage(Uint8List bytes, String name) async {
     );
   }
 }
-

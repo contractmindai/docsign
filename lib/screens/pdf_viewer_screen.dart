@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:url_launcher/url_launcher.dart';
-
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -33,6 +33,7 @@ import '../widgets/pro_panels.dart';
 import '../widgets/signature_dialog.dart';
 import '../widgets/signer_profile_dialog.dart';
 import '../widgets/thumbnail_strip.dart';
+import '../widgets/apple_dialog.dart';
 import 'document_compare_screen.dart';
 import 'pdf_tools_screen.dart';
 
@@ -40,6 +41,15 @@ class PdfViewerScreen extends StatefulWidget {
   final String filePath;
   final Uint8List? preloadedBytes;
   const PdfViewerScreen({super.key, required this.filePath, this.preloadedBytes});
+
+  static Future<void> navigate(BuildContext context, String path, {Uint8List? bytes}) {
+    return Navigator.push(context, PageRouteBuilder(
+      pageBuilder: (_, __, ___) => PdfViewerScreen(filePath: path, preloadedBytes: bytes),
+      transitionsBuilder: (_, animation, __, child) => FadeTransition(opacity: animation, child: child),
+      transitionDuration: const Duration(milliseconds: 300),
+    ));
+  }
+
   @override
   State<PdfViewerScreen> createState() => _PdfViewerScreenState();
 }
@@ -92,12 +102,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   bool get _annotating => _tool != AnnotationTool.view || _pendingSig != null;
   bool get _isIOS => Theme.of(context).platform == TargetPlatform.iOS;
 
-  // ── Mutable source bytes – can be updated after tools return ──
   Uint8List? _currentSourceBytes;
 
-  // ----------------------------------------------------------------------
-  // Device fingerprint (persistent, offline)
-  // ----------------------------------------------------------------------
   Future<String> _getDeviceFingerprint() async {
     final prefs = await SharedPreferences.getInstance();
     const key = 'device_fingerprint';
@@ -115,7 +121,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     _openDoc();
     _loadProfile();
     _scroll.addListener(_trackPage);
-    // Hide thumbnails on mobile
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (MediaQuery.of(context).size.width < 600 && _showThumbs) {
         setState(() => _showThumbs = false);
@@ -150,15 +155,39 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
   Future<void> _showPasswordDialog() async {
     final ctrl = TextEditingController();
-    final pwd = await showDialog<String>(context: context, barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        backgroundColor: DS.bgCard,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(children: [const Icon(Icons.lock_rounded, color: DS.orange, size: 20), const SizedBox(width: 8), Text('Password Protected', style: GoogleFonts.inter(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600))]),
-        content: TextField(controller: ctrl, autofocus: true, obscureText: true, style: const TextStyle(color: Colors.white), decoration: InputDecoration(hintText: 'Password', hintStyle: const TextStyle(color: Colors.white38), filled: true, fillColor: DS.bgCard2, prefixIcon: const Icon(Icons.key_rounded, color: DS.indigo, size: 18), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: DS.separator)), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: DS.indigo))), onSubmitted: (v) => Navigator.pop(context, v)),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.white38))), FilledButton(onPressed: () => Navigator.pop(context, ctrl.text), style: FilledButton.styleFrom(backgroundColor: DS.indigo), child: const Text('Open'))]));
-    if (pwd != null && pwd.isNotEmpty) { _password = pwd; _openDoc(password: pwd); }
-    else if (mounted) Navigator.pop(context);
+    final pwd = await AppleDialog.show<String>(
+      context: context,
+      title: 'Password Protected',
+      child: TextField(
+        controller: ctrl,
+        autofocus: true,
+        obscureText: true,
+        style: const TextStyle(color: Colors.white, fontSize: 15),
+        decoration: InputDecoration(
+          hintText: 'Enter password',
+          hintStyle: const TextStyle(color: Colors.white38),
+          filled: true,
+          fillColor: DS.bgCard2,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: DS.indigo),
+          ),
+        ),
+        onSubmitted: (v) => Navigator.pop(context, v),
+      ),
+      actions: [
+        AppleDialogAction(label: 'Cancel', onPressed: () => Navigator.pop(context)),
+        AppleDialogAction(label: 'Open', onPressed: () => Navigator.pop(context, ctrl.text)),
+      ],
+    );
+    if (pwd != null && pwd.isNotEmpty) {
+      _password = pwd;
+      _openDoc(password: pwd);
+    }
   }
 
   void _trackPage() {
@@ -198,26 +227,72 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
       ..translate(-center.dx, -center.dy)
       ..multiply(matrix);
     _transformationController.value = newMatrix;
-    if (mounted) setState(() {});
   }
 
   void _zoomIn() => _zoom(1.2);
   void _zoomOut() => _zoom(1 / 1.2);
   void _resetZoom() {
     _transformationController.value = Matrix4.identity();
-    if (mounted) setState(() {});
+  }
+
+  void _zoomToHighlight(Rect normRect) {
+    if (_readMode || _annotating) return;
+    final screenSize = MediaQuery.of(context).size;
+    final page = _doc!.pages[_visPage - 1];
+    final targetRect = Rect.fromLTWH(
+      normRect.left * page.width,
+      normRect.top * page.height,
+      normRect.width * page.width,
+      normRect.height * page.height,
+    );
+
+    double scaleX = screenSize.width * 0.6 / targetRect.width;
+    double scaleY = screenSize.height * 0.6 / targetRect.height;
+    double scale = scaleX < scaleY ? scaleX : scaleY;
+    scale = scale.clamp(1.5, 6.0);
+
+    final targetCenter = Offset(targetRect.center.dx, targetRect.center.dy);
+    final screenCenter = Offset(screenSize.width / 2, screenSize.height / 2);
+
+    final newMatrix = Matrix4.identity()
+      ..translate(screenCenter.dx, screenCenter.dy)
+      ..scale(scale)
+      ..translate(-targetCenter.dx, -targetCenter.dy)
+      ..multiply(_transformationController.value);
+
+    _transformationController.value = newMatrix;
   }
 
   Future<void> _loadSidecar() async {
     final snap = await AnnotationPersistenceService.load(widget.filePath);
     if (snap == null || snap.isEmpty || !mounted) return;
-    setState(() { _rects..clear()..addAll(snap.rects); _notes..clear()..addAll(snap.notes); _stamps..clear()..addAll(snap.stamps); _redacts..clear()..addAll(snap.redactions); _clauses..clear()..addAll(snap.bookmarks); _textEdits..clear()..addAll(snap.textEdits); snap.ink.forEach((k, v) { if (v != null) _ink[k] = v as InkAnnotation; }); });
+    setState(() {
+      _rects..clear()..addAll(snap.rects);
+      _notes..clear()..addAll(snap.notes);
+      _stamps..clear()..addAll(snap.stamps);
+      _redacts..clear()..addAll(snap.redactions);
+      _clauses..clear()..addAll(snap.bookmarks);
+      _textEdits..clear()..addAll(snap.textEdits);
+      snap.ink.forEach((k, v) { if (v != null) _ink[k] = v as InkAnnotation; });
+    });
   }
 
-  Future<void> _loadProfile() async { final pr = await SignerProfileService.loadProfile(); if (mounted) setState(() => _profile = pr); }
+  Future<void> _loadProfile() async {
+    final pr = await SignerProfileService.loadProfile();
+    if (mounted) setState(() => _profile = pr);
+  }
 
   Future<void> _detectExpiry() async {
-    try { final bytes = _currentSourceBytes ?? await PlatformFileService.readBytes(widget.filePath) ?? Uint8List(0); if (bytes.isEmpty) return; final raw = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127).take(60000)); final found = ExpiryDetector.detect(raw, 0); if (found.isNotEmpty && mounted) setState(() { _expiries = found; _showExpiryBanner = true; }); } catch (_) {}
+    try {
+      final bytes = _currentSourceBytes ?? await PlatformFileService.readBytes(widget.filePath) ?? Uint8List(0);
+      if (bytes.isEmpty) return;
+      final raw = String.fromCharCodes(bytes.where((b) => b >= 32 && b < 127).take(60000));
+      final found = ExpiryDetector.detect(raw, 0);
+      if (found.isNotEmpty && mounted) setState(() {
+        _expiries = found;
+        _showExpiryBanner = true;
+      });
+    } catch (_) {}
   }
 
   void _markMutated() {
@@ -225,6 +300,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     setState(() => _isSaved = false);
     Future.delayed(const Duration(seconds: 3), _autosaveNow);
   }
+
   Future<void> _autosaveNow() async {
     if (_lastMutation == null) return;
     _lastMutation = null;
@@ -236,14 +312,69 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
       if (mounted) setState(() => _isSaved = true);
     } catch (_) {}
   }
-  void _switchTab(_TabMode tab) { setState(() { _currentTab = tab; _tool = tab == _TabMode.edit ? AnnotationTool.textStamp : AnnotationTool.view; }); }
-  void _onToolChanged(AnnotationTool t) { if (t == AnnotationTool.signature || t == AnnotationTool.initials) { _launchSigDialog(isInitials: t == AnnotationTool.initials); return; } setState(() { _tool = t; _pendingSig = null; _initialsMode = false; }); }
-  Future<void> _launchSigDialog({bool isInitials = false}) async { final bytes = await SignatureDialog.show(context); if (bytes == null || !mounted) return; setState(() { _pendingSig = bytes; _initialsMode = isInitials; _tool = isInitials ? AnnotationTool.initials : AnnotationTool.signature; }); }
 
-  void _addRect(RectAnnotation a) => _mutate(() { _rects.putIfAbsent(a.pageIndex, () => []).add(a); _undoStack.add(() => setState(() => _rects[a.pageIndex]?.removeWhere((r) => r.id == a.id))); });
-  void _addInk(int pg, InkStroke s) => _mutate(() { final ex = _ink[pg]; _ink[pg] = ex == null ? InkAnnotation(id: _uuid.v4(), pageIndex: pg, strokes: [s]) : ex.addStroke(s); _undoStack.add(() => setState(() { final c = _ink[pg]; if (c == null) return; if (c.strokes.length == 1) { _ink.remove(pg); return; } _ink[pg] = InkAnnotation(id: c.id, pageIndex: pg, strokes: c.strokes.sublist(0, c.strokes.length - 1)); })); });
-  void _addNote(StickyNote n) => _mutate(() { _notes.putIfAbsent(n.pageIndex, () => []).add(n); _undoStack.add(() => setState(() => _notes[n.pageIndex]?.removeWhere((x) => x.id == n.id))); });
-  void _toggleNote(String id, bool e) => setState(() { for (final l in _notes.values) { for (final n in l) { if (n.id == id) n.isExpanded = e; } } });
+  void _switchTab(_TabMode tab) {
+    setState(() {
+      _currentTab = tab;
+      _tool = tab == _TabMode.edit ? AnnotationTool.textStamp : AnnotationTool.view;
+    });
+  }
+
+  void _onToolChanged(AnnotationTool t) {
+    if (t == AnnotationTool.signature || t == AnnotationTool.initials) {
+      _launchSigDialog(isInitials: t == AnnotationTool.initials);
+      return;
+    }
+    setState(() {
+      if (_tool == t) {
+        _tool = AnnotationTool.view;
+      } else {
+        _tool = t;
+      }
+      _pendingSig = null;
+      _initialsMode = false;
+    });
+  }
+
+  Future<void> _launchSigDialog({bool isInitials = false}) async {
+    final bytes = await SignatureDialog.show(context);
+    if (bytes == null || !mounted) return;
+    setState(() {
+      _pendingSig = bytes;
+      _initialsMode = isInitials;
+      _tool = isInitials ? AnnotationTool.initials : AnnotationTool.signature;
+    });
+  }
+
+  void _addRect(RectAnnotation a) => _mutate(() {
+    _rects.putIfAbsent(a.pageIndex, () => []).add(a);
+    _undoStack.add(() => setState(() => _rects[a.pageIndex]?.removeWhere((r) => r.id == a.id)));
+  });
+
+  void _addInk(int pg, InkStroke s) => _mutate(() {
+    final ex = _ink[pg];
+    _ink[pg] = ex == null ? InkAnnotation(id: _uuid.v4(), pageIndex: pg, strokes: [s]) : ex.addStroke(s);
+    _undoStack.add(() => setState(() {
+      final c = _ink[pg];
+      if (c == null) return;
+      if (c.strokes.length == 1) { _ink.remove(pg); return; }
+      _ink[pg] = InkAnnotation(id: c.id, pageIndex: pg, strokes: c.strokes.sublist(0, c.strokes.length - 1));
+    }));
+  });
+
+  void _addNote(StickyNote n) => _mutate(() {
+    _notes.putIfAbsent(n.pageIndex, () => []).add(n);
+    _undoStack.add(() => setState(() => _notes[n.pageIndex]?.removeWhere((x) => x.id == n.id)));
+  });
+
+  void _toggleNote(String id, bool e) => setState(() {
+    for (final l in _notes.values) {
+      for (final n in l) {
+        if (n.id == id) n.isExpanded = e;
+      }
+    }
+  });
+
   void _placeSig(SignatureOverlay sig) async {
     final fp = await _getDeviceFingerprint();
     final m = SignatureOverlay(
@@ -265,17 +396,77 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     });
     _signatureIps[m.id] = fp;
   }
-  void _moveSig(String id, Offset pos) => setState(() { for (final l in _sigs.values) { for (final s in l) { if (s.id == id) s.normPosition = pos; } } _markMutated(); });
-  void _resizeSig(String id, Size sz) => setState(() { for (final l in _sigs.values) { for (final s in l) { if (s.id == id) s.normSize = sz; } } _markMutated(); });
-  void _deleteSig(String id) => setState(() { for (final l in _sigs.values) l.removeWhere((s) => s.id == id); _signatureIps.remove(id); _markMutated(); });
-  void _addStamp(TextStamp s) => _mutate(() { _stamps.putIfAbsent(s.pageIndex, () => []).add(s); _undoStack.add(() => setState(() => _stamps[s.pageIndex]?.removeWhere((x) => x.id == s.id))); });
-  void _addRedact(RedactionRect r) => _mutate(() { _redacts.putIfAbsent(r.pageIndex, () => []).add(r); _undoStack.add(() => setState(() => _redacts[r.pageIndex]?.removeWhere((x) => x.id == r.id))); });
-  void _addBookmark(ClauseBookmark b) => _mutate(() { _clauses.putIfAbsent(b.pageIndex, () => []).add(b); _undoStack.add(() => setState(() => _clauses[b.pageIndex]?.removeWhere((x) => x.id == b.id))); });
-  void _addTextEdit(TextEditAnnotation t) => _mutate(() { _textEdits.putIfAbsent(t.pageIndex, () => []).add(t); _undoStack.add(() => setState(() => _textEdits[t.pageIndex]?.removeWhere((x) => x.id == t.id))); });
-  void _mutate(VoidCallback fn) { setState(fn); _markMutated(); }
 
-  Map<int, int> get _annCounts { final m = <int, int>{}; for (int i = 0; i < _pageCount; i++) { final c = (_rects[i]?.length ?? 0) + (_notes[i]?.length ?? 0) + (_sigs[i]?.length ?? 0) + (_stamps[i]?.length ?? 0) + (_redacts[i]?.length ?? 0) + (_clauses[i]?.length ?? 0) + (_textEdits[i]?.length ?? 0) + (_ink[i] != null ? 1 : 0); if (c > 0) m[i] = c; } return m; }
-  void _undo() { if (_undoStack.isEmpty) return; _undoStack.removeLast()(); _markMutated(); }
+  void _moveSig(String id, Offset pos) => setState(() {
+    for (final l in _sigs.values) {
+      for (final s in l) {
+        if (s.id == id) s.normPosition = pos;
+      }
+    }
+    _markMutated();
+  });
+
+  void _resizeSig(String id, Size sz) => setState(() {
+    for (final l in _sigs.values) {
+      for (final s in l) {
+        if (s.id == id) s.normSize = sz;
+      }
+    }
+    _markMutated();
+  });
+
+  void _deleteSig(String id) => setState(() {
+    for (final l in _sigs.values) l.removeWhere((s) => s.id == id);
+    _signatureIps.remove(id);
+    _markMutated();
+  });
+
+  void _addStamp(TextStamp s) => _mutate(() {
+    _stamps.putIfAbsent(s.pageIndex, () => []).add(s);
+    _undoStack.add(() => setState(() => _stamps[s.pageIndex]?.removeWhere((x) => x.id == s.id)));
+  });
+
+  void _addRedact(RedactionRect r) => _mutate(() {
+    _redacts.putIfAbsent(r.pageIndex, () => []).add(r);
+    _undoStack.add(() => setState(() => _redacts[r.pageIndex]?.removeWhere((x) => x.id == r.id)));
+  });
+
+  void _addBookmark(ClauseBookmark b) => _mutate(() {
+    _clauses.putIfAbsent(b.pageIndex, () => []).add(b);
+    _undoStack.add(() => setState(() => _clauses[b.pageIndex]?.removeWhere((x) => x.id == b.id)));
+  });
+
+  void _addTextEdit(TextEditAnnotation t) => _mutate(() {
+    _textEdits.putIfAbsent(t.pageIndex, () => []).add(t);
+    _undoStack.add(() => setState(() => _textEdits[t.pageIndex]?.removeWhere((x) => x.id == t.id)));
+  });
+
+  void _mutate(VoidCallback fn) {
+    setState(fn);
+    _markMutated();
+  }
+
+  Map<int, int> get _annCounts {
+    final m = <int, int>{};
+    for (int i = 0; i < _pageCount; i++) {
+      final c = (_rects[i]?.length ?? 0) +
+          (_notes[i]?.length ?? 0) +
+          (_sigs[i]?.length ?? 0) +
+          (_stamps[i]?.length ?? 0) +
+          (_redacts[i]?.length ?? 0) +
+          (_clauses[i]?.length ?? 0) +
+          (_textEdits[i]?.length ?? 0) +
+          (_ink[i] != null ? 1 : 0);
+      if (c > 0) m[i] = c;
+    }
+    return m;
+  }
+
+  void _undo() {
+    if (_undoStack.isEmpty) return;
+    _undoStack.removeLast()();
+    _markMutated();
+  }
 
   Future<String?> _buildPdf() => PdfSaveService.save(
     sourcePath: widget.filePath,
@@ -291,10 +482,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     slots: _slots,
     signerProfile: _profile,
     signatureIps: _signatureIps,
-    sourceBytes: _currentSourceBytes,   // ← uses current bytes
+    sourceBytes: _currentSourceBytes,
   );
 
-  // ------------------ OPEN TOOLS & RELOAD AFTER RESULT ------------------
   Future<void> _openTools() async {
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
@@ -320,8 +510,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
       _doc?.dispose();
       _doc = null;
       _pageCount = 0;
-      _currentSourceBytes = bytes;   // update the source bytes
-      // Clear annotations – new document has none
+      _currentSourceBytes = bytes;
       _rects.clear();
       _ink.clear();
       _notes.clear();
@@ -334,7 +523,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     });
 
     try {
-      // Use the new path but with the new bytes.
       final doc = await PdfLoader.openForViewing(path: path, bytes: bytes);
       if (mounted) setState(() {
         _doc = doc;
@@ -350,18 +538,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     }
   }
 
-  // ------------------ SAVE & SHARE with GO-HOME DIALOG ------------------
   Future<void> _save() async {
     if (_isSaving || _docLoading || _doc == null) return;
 
-    // 1. Ask for file name
     final defaultName = p.basenameWithoutExtension(widget.filePath);
     final desiredName = await _askFileName(defaultName: defaultName);
-    if (desiredName == null || desiredName.isEmpty) return;   // user cancelled
+    if (desiredName == null || desiredName.isEmpty) return;
 
     final safeName = desiredName.endsWith('.pdf') ? desiredName : '$desiredName.pdf';
 
-    // 2. Optional: choose a destination folder (mobile/desktop only)
     String? customDir;
     if (!kIsWeb) {
       customDir = await FilePicker.platform.getDirectoryPath(
@@ -371,14 +556,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
     setState(() => _isSaving = true);
     try {
-      // 3. Get the PDF bytes – use the current ones if available, else rebuild
       Uint8List? bytes;
 
       if (_currentSourceBytes != null) {
-        // Use the document exactly as it is displayed (rotated, watermarked, etc.)
         bytes = _currentSourceBytes;
       } else {
-        // Fallback: rebuild from annotations (rarely needed after tools)
         final sourcePath = await _buildPdf();
         if (sourcePath != null) {
           bytes = PlatformFileService.getCached(sourcePath) ??
@@ -388,7 +570,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
       if (bytes == null) throw Exception('Could not read PDF bytes');
 
-      // 4. Write the bytes to the chosen location
       if (customDir != null && !kIsWeb) {
         final dest = File('$customDir/$safeName');
         await dest.writeAsBytes(bytes);
@@ -435,7 +616,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
         downloadFile(safeName, sourceBytes);
         if (mounted) _showPostActionDialog();
       } else {
-        // Copy to temp with the new name before sharing
         final tempDir = await getTemporaryDirectory();
         final tempFile = File('${tempDir.path}/$safeName');
         await tempFile.writeAsBytes(sourceBytes);
@@ -467,8 +647,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     if (!_scroll.hasClients) return;
     final sw = MediaQuery.of(context).size.width;
     final ph = _getPageHeight(sw);
-    _scroll.animateTo((idx * ph).clamp(0.0, _scroll.position.maxScrollExtent),
-        duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+    final target = (idx * ph).clamp(0.0, _scroll.position.maxScrollExtent);
+    _scroll.animateTo(target,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeOutCubic);
   }
 
   void _snack(String msg, {bool err = false, int duration = 3}) {
@@ -484,74 +666,72 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   }
 
   void _showPostActionDialog([String? message]) {
-    showDialog(
+    AppleDialog.show(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: DS.bgCard,
-        title: const Text('Done', style: TextStyle(color: Colors.white)),
-        content: Text(
-          message ?? 'Do you want to open another document?',
-          style: const TextStyle(color: Colors.white70),
+      title: 'Done',
+      content: message ?? 'Do you want to open another document?',
+      actions: [
+        AppleDialogAction(label: 'No', onPressed: () => Navigator.pop(context)),
+        AppleDialogAction(
+          label: 'Yes',
+          onPressed: () {
+            Navigator.pop(context);
+            Navigator.of(context).popUntil((route) => route.isFirst);
+          },
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('No', style: TextStyle(color: Colors.white54)),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);                // close dialog
-              Navigator.of(context).popUntil((route) => route.isFirst); // go to home
-            },
-            style: FilledButton.styleFrom(backgroundColor: DS.indigo),
-            child: const Text('Yes'),
-          ),
-        ],
-      ),
+      ],
     );
   }
-  
+
   Future<String?> _askFileName({String? defaultName}) async {
-    final controller = TextEditingController(
-      text: defaultName ?? 'document',
-    );
-    return showDialog<String>(
+    final controller = TextEditingController(text: defaultName ?? 'document');
+    return AppleDialog.show<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: DS.bgCard,
-        title: const Text('Save as', style: TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            hintText: 'Enter file name',
-            filled: true,
-            fillColor: DS.bgCard2,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
+      title: 'Save as',
+      child: TextField(
+        controller: controller,
+        autofocus: true,
+        style: const TextStyle(color: Colors.white, fontSize: 15),
+        decoration: InputDecoration(
+          hintText: 'Enter file name',
+          filled: true,
+          fillColor: DS.bgCard2,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+        ),
+        onSubmitted: (v) => Navigator.pop(context, v.trim()),
+      ),
+      actions: [
+        AppleDialogAction(label: 'Cancel', onPressed: () => Navigator.pop(context)),
+        AppleDialogAction(label: 'Save', onPressed: () => Navigator.pop(context, controller.text.trim())),
+      ],
+    );
+  }
+
+  double _getPageAspect() {
+    if (_doc == null) return 1.414;
+    final page = _doc!.pages[_visPage - 1];
+    return page.width / page.height;
+  }
+
+  Widget _pageList() {
+    if (_docLoading) {
+      return Shimmer(
+        child: ListView.builder(
+          itemCount: 3,
+          itemBuilder: (_, i) => Container(
+            margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+            height: 300,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
             ),
           ),
-          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            style: FilledButton.styleFrom(backgroundColor: DS.indigo),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
-  // ----------------------------------------------------------------------
-  // RESPONSIVE PAGE LIST (dynamic width)
-  // ----------------------------------------------------------------------
-  Widget _pageList() {
+      );
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final screenWidth = constraints.maxWidth;
@@ -566,6 +746,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
         else widthFactor = 0.82;
 
         double availW = (usableWidth * widthFactor).clamp(280.0, 1200.0);
+        final aspect = _getPageAspect();
+        final pageHeight = availW / aspect;
 
         return ListView.builder(
           controller: _scroll,
@@ -581,6 +763,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
               child: Center(
                 child: Container(
                   width: availW,
+                  height: pageHeight,
                   margin: EdgeInsets.only(bottom: isMobile ? 8 : 12),
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -599,10 +782,18 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                         ? _buildPageWidget(i, availW)
                         : InteractiveViewer(
                             transformationController: _transformationController,
-                            minScale: 0.8,
+                            minScale: 0.5,
                             maxScale: 5.0,
+                            clipBehavior: Clip.none,
                             boundaryMargin: const EdgeInsets.all(20),
-                            child: _buildPageWidget(i, availW),
+                            scaleEnabled: true,
+                            panEnabled: true,
+                            constrained: false,
+                            child: SizedBox(
+                              width: availW,
+                              height: pageHeight,
+                              child: _buildPageWidget(i, availW),
+                            ),
                           ),
                   ),
                 ),
@@ -616,111 +807,166 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
   Widget _buildPageWidget(int pageIndex, double width) {
     return PdfPageWidget(
-      key: ValueKey('pg_$pageIndex'), document: _doc!, pageIndex: pageIndex, displayWidth: width, darkMode: _darkMode,
-      rects: _rects[pageIndex] ?? [], ink: _ink[pageIndex], notes: _notes[pageIndex] ?? [], signatures: _sigs[pageIndex] ?? [],
-      textStamps: _stamps[pageIndex] ?? [], redactions: _redacts[pageIndex] ?? [], clauseBookmarks: _clauses[pageIndex] ?? [], textEdits: _textEdits[pageIndex] ?? [],
-      tool: _tool, annotationColor: _inkColor, inkStrokeWidth: 0.006,
-      pendingSignature: (_tool == AnnotationTool.signature || _tool == AnnotationTool.initials) ? _pendingSig : null, isInitialMode: _initialsMode,
-      onRectAdded: _addRect, onInkStrokeAdded: (s) => _addInk(pageIndex, s), onNoteAdded: _addNote, onNoteToggled: _toggleNote,
-      onSignaturePlaced: _placeSig, onSignatureMoved: _moveSig, onSignatureResized: _resizeSig, onSignatureDeleted: _deleteSig,
-      onTextStampAdded: _addStamp, onRedactionAdded: _addRedact, onBookmarkAdded: _addBookmark, onTextEditAdded: _addTextEdit);
+      key: ValueKey('pg_$pageIndex'),
+      document: _doc!,
+      pageIndex: pageIndex,
+      displayWidth: width,
+      darkMode: _darkMode,
+      rects: _rects[pageIndex] ?? [],
+      ink: _ink[pageIndex],
+      notes: _notes[pageIndex] ?? [],
+      signatures: _sigs[pageIndex] ?? [],
+      textStamps: _stamps[pageIndex] ?? [],
+      redactions: _redacts[pageIndex] ?? [],
+      clauseBookmarks: _clauses[pageIndex] ?? [],
+      textEdits: _textEdits[pageIndex] ?? [],
+      tool: _tool,
+      annotationColor: _inkColor,
+      inkStrokeWidth: 0.006,
+      pendingSignature: (_tool == AnnotationTool.signature || _tool == AnnotationTool.initials) ? _pendingSig : null,
+      isInitialMode: _initialsMode,
+      onRectAdded: _addRect,
+      onInkStrokeAdded: (s) => _addInk(pageIndex, s),
+      onNoteAdded: _addNote,
+      onNoteToggled: _toggleNote,
+      onSignaturePlaced: _placeSig,
+      onSignatureMoved: _moveSig,
+      onSignatureResized: _resizeSig,
+      onSignatureDeleted: _deleteSig,
+      onTextStampAdded: _addStamp,
+      onRedactionAdded: _addRedact,
+      onBookmarkAdded: _addBookmark,
+      onTextEditAdded: _addTextEdit,
+      onHighlightTapped: _zoomToHighlight,
+    );
   }
 
-  Widget _errorView() => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-    const Icon(Icons.error_outline_rounded, color: DS.red, size: 44),
-    const SizedBox(height: 10),
-    Text('Cannot open file', style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
-    const SizedBox(height: 6),
-    Padding(padding: const EdgeInsets.symmetric(horizontal: 32), child: Text(_docError!, style: DS.caption(), textAlign: TextAlign.center)),
-    const SizedBox(height: 16),
-    FilledButton.icon(onPressed: () => _openDoc(), icon: const Icon(Icons.refresh_rounded, size: 16), label: const Text('Retry'), style: FilledButton.styleFrom(backgroundColor: DS.indigo)),
-  ]));
+  Widget _errorView() => Center(
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      const Icon(Icons.error_outline_rounded, color: DS.red, size: 44),
+      const SizedBox(height: 10),
+      Text('Cannot open file', style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+      const SizedBox(height: 6),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Text(_docError!, style: DS.caption(), textAlign: TextAlign.center),
+      ),
+      const SizedBox(height: 16),
+      FilledButton.icon(
+        onPressed: () => _openDoc(),
+        icon: const Icon(Icons.refresh_rounded, size: 16),
+        label: const Text('Retry'),
+        style: FilledButton.styleFrom(backgroundColor: DS.indigo),
+      ),
+    ]),
+  );
 
-  Widget _topBar() {
-    return SafeArea(
-      bottom: false,
-      child: Container(
-        height: 52,
-        color: DS.bgCard,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Row(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20),
-              onPressed: () => Navigator.pop(context),
-            ),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+  PreferredSizeWidget _topBar() {
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(52),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: Container(
+          color: DS.bgCard.withOpacity(0.85),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: SafeArea(
+            bottom: false,
+            child: SizedBox(
+              height: 52,
+              child: Row(
                 children: [
-                  Text(p.basename(widget.filePath), style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white), overflow: TextOverflow.ellipsis, maxLines: 1),
-                  Text('p.$_visPage / $_pageCount', style: DS.caption().copyWith(fontSize: 10)),
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  Flexible(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          p.basename(widget.filePath),
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                        Text(
+                          'p.$_visPage / $_pageCount',
+                          style: DS.caption().copyWith(fontSize: 10, color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: Icon(_readMode ? Icons.menu_book_rounded : Icons.zoom_in_rounded, color: Colors.white54, size: 20),
+                    tooltip: _readMode ? 'Read Mode' : 'Zoom Mode',
+                    onPressed: _toggleReadMode,
+                  ),
+                  if (_docLoading)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Icon(Icons.save_rounded, color: Colors.white24, size: 22),
+                    )
+                  else if (_isSaving)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: DS.indigo)),
+                    )
+                  else
+                    IconButton(
+                      icon: const Icon(Icons.save_rounded, color: DS.indigo, size: 22),
+                      tooltip: kIsWeb ? 'Download' : 'Save',
+                      onPressed: _save,
+                    ),
+                  IconButton(
+                    icon: Icon(kIsWeb ? Icons.download_rounded : Icons.ios_share_rounded, color: DS.indigo, size: 20),
+                    onPressed: _share,
+                  ),
                 ],
               ),
             ),
-            IconButton(
-              icon: Icon(_readMode ? Icons.menu_book_rounded : Icons.zoom_in_rounded, color: Colors.white54, size: 20),
-              tooltip: _readMode ? 'Read Mode' : 'Zoom Mode',
-              onPressed: _toggleReadMode,
-            ),
-            if (_docLoading)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Icon(Icons.save_rounded, color: Colors.white24, size: 22),
-              )
-            else if (_isSaving)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: DS.indigo)),
-              )
-            else
-              IconButton(
-                icon: const Icon(Icons.save_rounded, color: DS.indigo, size: 22),
-                tooltip: kIsWeb ? 'Download' : 'Save',
-                onPressed: _save,
-              ),
-            IconButton(icon: Icon(kIsWeb ? Icons.download_rounded : Icons.ios_share_rounded, color: DS.indigo, size: 20), onPressed: _share),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  // Floating zoom buttons
   Widget _floatingZoomButtons() {
     if (_readMode || _annotating) return const SizedBox();
     return Positioned(
-      bottom: 80,
-      right: 16,
-      child: Container(
-        decoration: BoxDecoration(
-          color: DS.bgCard,
-          borderRadius: BorderRadius.circular(30),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 12)],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _fabButton(Icons.zoom_out, _zoomOut),
-            _fabButton(Icons.zoom_in, _zoomIn),
-            _fabButton(Icons.aspect_ratio, _resetZoom),
-          ],
-        ),
+      top: 70,
+      right: 12,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _zoomFabButton(Icons.zoom_in, 'Zoom in', _zoomIn),
+          const SizedBox(height: 8),
+          _zoomFabButton(Icons.zoom_out, 'Zoom out', _zoomOut),
+          const SizedBox(height: 8),
+          _zoomFabButton(Icons.aspect_ratio, 'Reset zoom', _resetZoom),
+        ],
       ),
     );
   }
 
-  Widget _fabButton(IconData icon, VoidCallback onPressed) {
-    return Container(
-      margin: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: DS.bgCard2,
+  Widget _zoomFabButton(IconData icon, String label, VoidCallback onPressed) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          onPressed();
+        },
         borderRadius: BorderRadius.circular(20),
-      ),
-      child: IconButton(
-        icon: Icon(icon, color: DS.textPrimary),
-        onPressed: onPressed,
-        tooltip: '',
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: DS.bgCard.withOpacity(0.85),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: DS.textPrimary, size: 20),
+        ),
       ),
     );
   }
@@ -886,7 +1132,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 }
 
 // ============================================================================
-// Bottom Bar (unchanged)
+// Bottom Bar
 // ============================================================================
 enum _TabMode { edit, annotate, fillSign, all }
 
@@ -961,10 +1207,70 @@ class _BottomBar extends StatelessWidget {
 
   Widget _colorPalette() {
     const colors = [Colors.black, Colors.red, Colors.blue, Colors.green, Colors.orange, Colors.purple, Color(0xFF6366F1), Colors.white];
-    return Row(mainAxisSize: MainAxisSize.min, children: [Container(width: 1, height: 24, color: Colors.white12, margin: const EdgeInsets.symmetric(horizontal: 4)), ...colors.map((c) => GestureDetector(onTap: () => onColorChange(c), child: Container(width: 22, height: 22, margin: const EdgeInsets.symmetric(horizontal: 3), decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: inkColor == c ? Colors.white : c == Colors.white ? Colors.grey : Colors.transparent, width: 2.5), boxShadow: inkColor == c ? [BoxShadow(color: c.withOpacity(0.5), blurRadius: 6)] : null)))), Container(width: 1, height: 24, color: Colors.white12, margin: const EdgeInsets.symmetric(horizontal: 4))]);
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Container(width: 1, height: 24, color: Colors.white12, margin: const EdgeInsets.symmetric(horizontal: 4)),
+      ...colors.map((c) => ScaleTap(
+        onTap: () => onColorChange(c),
+        child: Container(
+          width: 22, height: 22, margin: const EdgeInsets.symmetric(horizontal: 3),
+          decoration: BoxDecoration(
+            color: c,
+            shape: BoxShape.circle,
+            border: Border.all(color: inkColor == c ? Colors.white : c == Colors.white ? Colors.grey : Colors.transparent, width: 2.5),
+          ),
+        ),
+      )),
+      Container(width: 1, height: 24, color: Colors.white12, margin: const EdgeInsets.symmetric(horizontal: 4)),
+    ]);
   }
 
-  Widget _tab(_TabMode mode, String label, IconData icon) { final active = current == mode; return Expanded(child: GestureDetector(onTap: () => onTabChange(mode), behavior: HitTestBehavior.opaque, child: Container(padding: const EdgeInsets.symmetric(vertical: 7), decoration: BoxDecoration(border: Border(top: BorderSide(color: active ? DS.indigo : Colors.transparent, width: 2.5))), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 18, color: active ? DS.indigo : DS.textSecondary), const SizedBox(height: 1), Text(label, style: TextStyle(color: active ? DS.indigo : DS.textSecondary, fontSize: 9, fontWeight: active ? FontWeight.w700 : FontWeight.w500))])))); }
-  Widget _tb(IconData icon, String label, AnnotationTool tool, Color tint) { final active = currentTool == tool; return Tooltip(message: label, child: GestureDetector(onTap: () => onToolChange(tool), child: AnimatedContainer(duration: const Duration(milliseconds: 150), margin: const EdgeInsets.only(right: 4), padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), decoration: BoxDecoration(color: active ? tint.withOpacity(0.18) : Colors.transparent, borderRadius: BorderRadius.circular(10), border: active ? Border.all(color: tint.withOpacity(0.5)) : null), child: Icon(icon, size: 22, color: active ? tint : Colors.white54)))); }
-  Widget _ab(IconData icon, String tip, VoidCallback t, {Color color = Colors.white54}) => Tooltip(message: tip, child: GestureDetector(onTap: t, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), child: Icon(icon, size: 22, color: color))));
+  Widget _tab(_TabMode mode, String label, IconData icon) {
+    final active = current == mode;
+    return Expanded(child: ScaleTap(
+      onTap: () => onTabChange(mode),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        decoration: BoxDecoration(border: Border(top: BorderSide(color: active ? DS.indigo : Colors.transparent, width: 2.5))),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 18, color: active ? DS.indigo : DS.textSecondary),
+          const SizedBox(height: 1),
+          Text(label, style: TextStyle(color: active ? DS.indigo : DS.textSecondary, fontSize: 9, fontWeight: active ? FontWeight.w700 : FontWeight.w500)),
+        ]),
+      ),
+    ));
+  }
+
+  Widget _tb(IconData icon, String label, AnnotationTool tool, Color tint) {
+    final active = currentTool == tool;
+    return Tooltip(
+      message: label,
+      child: ScaleTap(
+        onTap: () => onToolChange(tool),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          margin: const EdgeInsets.only(right: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: active ? tint.withOpacity(0.18) : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: active ? Border.all(color: tint.withOpacity(0.5)) : null,
+          ),
+          child: Icon(icon, size: 22, color: active ? tint : Colors.white54),
+        ),
+      ),
+    );
+  }
+
+  Widget _ab(IconData icon, String tip, VoidCallback t, {Color color = Colors.white54}) {
+    return Tooltip(
+      message: tip,
+      child: ScaleTap(
+        onTap: t,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Icon(icon, size: 22, color: color),
+        ),
+      ),
+    );
+  }
 }

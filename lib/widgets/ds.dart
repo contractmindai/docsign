@@ -1,9 +1,10 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DS — Premium Design System
+// DS — Premium Design System (existing)
 // Human-crafted spacing, optical tuning, warm imperfections.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -162,7 +163,124 @@ class DS {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Premium Widgets (with irregular spacing and asymmetric padding)
+// AppTheme – Centralised design tokens (NEW)
+// ─────────────────────────────────────────────────────────────────────────────
+class AppTheme {
+  // Radii
+  static const double radiusSmall   = 8.0;
+  static const double radiusMedium  = 12.0;
+  static const double radiusLarge   = 16.0;
+  static const double radiusXLarge  = 24.0;
+
+  // Consistent shadows
+  static List<BoxShadow> cardShadow = [
+    BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 12, offset: const Offset(0, 4)),
+    BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4, offset: const Offset(0, 1)),
+  ];
+
+  static List<BoxShadow> cardShadowHover = [
+    BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 20, offset: const Offset(0, 8)),
+    BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 6, offset: const Offset(0, 2)),
+  ];
+
+  // Gradients
+  static const LinearGradient primaryGradient = LinearGradient(
+    colors: [DS.indigo, DS.purple],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static const LinearGradient subtleOverlay = LinearGradient(
+    colors: [Colors.transparent, Colors.black12],
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+  );
+
+  // Animation durations
+  static const Duration shortAnim = Duration(milliseconds: 150);
+  static const Duration mediumAnim = Duration(milliseconds: 300);
+  static const Duration longAnim = Duration(milliseconds: 500);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shimmer – Skeleton loader (no extra package)
+// ─────────────────────────────────────────────────────────────────────────────
+class Shimmer extends StatefulWidget {
+  final Widget child;
+  final Duration duration;
+  const Shimmer({super.key, required this.child, this.duration = const Duration(seconds: 1)});
+
+  @override
+  State<Shimmer> createState() => _ShimmerState();
+}
+
+class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Gradient?> _gradientAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: widget.duration)..repeat(reverse: true);
+    _gradientAnimation = _controller.drive(Tween<Gradient?>(
+      begin: const LinearGradient(colors: [Colors.white10, Colors.white24, Colors.white10], stops: [0.1, 0.5, 0.9]),
+      end: const LinearGradient(colors: [Colors.white24, Colors.white10, Colors.white24], stops: [0.1, 0.5, 0.9]),
+    ));
+  }
+
+  @override
+  void dispose() { _controller.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _gradientAnimation,
+    builder: (ctx, child) => ShaderMask(
+      shaderCallback: (bounds) => _gradientAnimation.value!.createShader(bounds),
+      blendMode: BlendMode.srcATop,
+      child: widget.child,
+    ),
+    child: widget.child,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ScaleTap – micro-interaction for any widget (NEW)
+// ─────────────────────────────────────────────────────────────────────────────
+class ScaleTap extends StatefulWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  final double scale;
+  const ScaleTap({super.key, required this.child, this.onTap, this.scale = 0.96});
+
+  @override
+  State<ScaleTap> createState() => _ScaleTapState();
+}
+
+class _ScaleTapState extends State<ScaleTap> with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: AppTheme.shortAnim);
+    _anim = Tween(begin: 1.0, end: widget.scale).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTapDown: (_) => _ctrl.forward(),
+    onTapUp: (_) { _ctrl.reverse(); HapticFeedback.lightImpact(); widget.onTap?.call(); },
+    onTapCancel: () => _ctrl.reverse(),
+    child: ScaleTransition(scale: _anim, child: widget.child),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Premium Widgets (existing, with minor improvements to use AppTheme where suitable)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Primary CTA button – taller, softer, asymmetrically weighted.
@@ -502,7 +620,7 @@ class DSKeyHint extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ADDED: DSTopBar – used in HomeScreen for web/mobile templates
+// DSTopBar – used in HomeScreen for web/mobile templates
 // ─────────────────────────────────────────────────────────────────────────────
 class DSTopBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;

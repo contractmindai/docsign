@@ -1,15 +1,16 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/text_search_service.dart';
-// import removed';
+import '../widgets/ds.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SearchPanel
 //
 // Slides down from the app bar. Debounced search across PDF text.
-// Shows results as a scrollable list — tap to jump to page.
+// Shows results as a scrollable list — tap to jump to page,
+// long‑press to copy the matched text.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SearchPanel extends StatefulWidget {
@@ -73,7 +74,6 @@ class _SearchPanelState extends State<SearchPanel>
   }
 
   Future<void> _runSearch(String query) async {
-    // TextSearchService.search returns List<SearchMatch>
     final matches = await TextSearchService.search(
         pdfPath: widget.pdfPath, query: query);
     if (!mounted) return;
@@ -82,7 +82,6 @@ class _SearchPanelState extends State<SearchPanel>
       flat.add(_FlatResult(pageIndex: m.pageIndex, match: m));
     }
     flat.sort((a, b) => a.pageIndex.compareTo(b.pageIndex));
-    // Convert to map for _results display
     final res = <int, List<SearchMatch>>{};
     for (final f in flat) {
       res.putIfAbsent(f.pageIndex, () => []).add(f.match);
@@ -101,6 +100,21 @@ class _SearchPanelState extends State<SearchPanel>
     if (_flat.isEmpty) return;
     setState(() => _current = (_current + 1) % _flat.length);
     widget.onNavigate(_flat[_current].pageIndex + 1);
+  }
+
+  void _copyMatchText(_FlatResult result) {
+    final textToCopy = result.match.matchText;
+    Clipboard.setData(ClipboardData(text: textToCopy));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Copied: "$textToCopy"', style: const TextStyle(color: Colors.white, fontSize: 12)),
+        backgroundColor: DS.indigo,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 1),
+        margin: const EdgeInsets.all(12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   @override
@@ -219,6 +233,7 @@ class _SearchPanelState extends State<SearchPanel>
                       setState(() => _current = i);
                       widget.onNavigate(r.pageIndex + 1);
                     },
+                    onLongPress: () => _copyMatchText(r),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
                       color: isActive

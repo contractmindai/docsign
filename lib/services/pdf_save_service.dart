@@ -21,9 +21,10 @@ class PdfSaveService {
   static pw.Font? _boldFont;
   static bool _fontsLoaded = false;
 
-  // ----------------------------------------------------------------------
-  // Prebuilt decorations (non‑const, static final)
-  // ----------------------------------------------------------------------
+  // Adaptive rendering limit: 2.5 megapixels per page
+  static const int _maxRenderedPixels = 2500000;
+
+  // Prebuilt decorations
   static final pw.EdgeInsets _stickyPadding = pw.EdgeInsets.all(6);
   static final pw.BoxBorder _stickyBorder = pw.Border.all(color: PdfColors.amber);
   static final pw.BoxDecoration _stickyDecoration = pw.BoxDecoration(
@@ -50,9 +51,6 @@ class PdfSaveService {
     color: PdfColors.black,
   );
 
-  // ----------------------------------------------------------------------
-  // Color cache
-  // ----------------------------------------------------------------------
   static final Map<int, PdfColor> _colorCache = {};
 
   static PdfColor _pdfColor(dynamic color, {double opacity = 1.0}) {
@@ -70,17 +68,17 @@ class PdfSaveService {
       r = (value >> 16) & 0xFF;
       g = (value >> 8) & 0xFF;
       b = value & 0xFF;
-      return PdfColor(
-        (r / 255.0) * opacity,
-        (g / 255.0) * opacity,
-        (b / 255.0) * opacity,
-      );
+      if (opacity < 0.999) {
+        return PdfColor(
+          (r / 255.0) * opacity,
+          (g / 255.0) * opacity,
+          (b / 255.0) * opacity,
+        );
+      }
+      return PdfColor(r / 255.0, g / 255.0, b / 255.0);
     });
   }
 
-  // ----------------------------------------------------------------------
-  // Public font access
-  // ----------------------------------------------------------------------
   static pw.Font? get regularFont => _regularFont;
   static pw.Font? get boldFont => _boldFont;
 
@@ -92,16 +90,13 @@ class PdfSaveService {
     PdfColor? color,
   }) {
     return pw.TextStyle(
-      font: bold ? (_boldFont ?? pw.Font.helveticaBold()) 
+      font: bold ? (_boldFont ?? pw.Font.helveticaBold())
                  : (_regularFont ?? pw.Font.helvetica()),
       fontSize: fontSize,
       color: color,
     );
   }
 
-  // ----------------------------------------------------------------------
-  // Font loading
-  // ----------------------------------------------------------------------
   static Future<void> _loadFonts() async {
     if (_fontsLoaded) return;
     try {
@@ -118,7 +113,7 @@ class PdfSaveService {
   }
 
   // ----------------------------------------------------------------------
-  // Main save method
+  // Main save method (processes one page at a time to save memory)
   // ----------------------------------------------------------------------
   static Future<String?> save({
     required String sourcePath,
@@ -157,39 +152,23 @@ class PdfSaveService {
     }
 
     try {
-      // Dynamic batching based on CPU cores (safe on web)
-      int batchSize;
-      if (kIsWeb) {
-        batchSize = 1; // web is memory sensitive
-      } else {
-        final cores = io.Platform.numberOfProcessors;
-        if (cores <= 2) batchSize = 1;
-        else if (cores <= 4) batchSize = 2;
-        else batchSize = 3;
-      }
-
-      for (int i = 0; i < pageCount; i += batchSize) {
-        final batch = <Future>[];
-        for (int j = i; j < (i + batchSize).clamp(0, pageCount); j++) {
-          batch.add(_processPage(
-            doc: doc, src: src, pageIndex: j,
-            pageW: src.pages[j].width,
-            pageH: src.pages[j].height,
-            rectAnnotations: rectAnnotations,
-            inkAnnotations: inkAnnotations,
-            stickyNotes: stickyNotes,
-            signatures: signatures,
-            textStamps: textStamps,
-            redactions: redactions,
-            bookmarks: bookmarks,
-            textEdits: textEdits,
-          ));
-        }
-        await Future.wait(batch);
-        // Yield every 2 batches to keep UI responsive
-        if (i % (batchSize * 2) == 0) {
-          await Future.delayed(Duration.zero);
-        }
+      // Process pages sequentially (batch size = 1)
+      for (int i = 0; i < pageCount; i++) {
+        await _processPage(
+          doc: doc, src: src, pageIndex: i,
+          pageW: src.pages[i].width,
+          pageH: src.pages[i].height,
+          rectAnnotations: rectAnnotations,
+          inkAnnotations: inkAnnotations,
+          stickyNotes: stickyNotes,
+          signatures: signatures,
+          textStamps: textStamps,
+          redactions: redactions,
+          bookmarks: bookmarks,
+          textEdits: textEdits,
+        );
+        // Allow garbage collection between pages
+        await Future.delayed(Duration.zero);
       }
 
       final signed = signatures.values.expand((l) => l).toList();
@@ -200,10 +179,10 @@ class PdfSaveService {
       final outName = '${p.basenameWithoutExtension(p.basename(sourcePath))}_signed.pdf';
       final output = await PlatformFileService.outputPath(outName);
       final pdfBytes = await doc.save() as Uint8List;
-      
+
       PlatformFileService.cache(output, pdfBytes);
       await PlatformFileService.writeBytes(output, pdfBytes);
-      
+
       return output;
     } finally {
       src.dispose();
@@ -211,7 +190,7 @@ class PdfSaveService {
   }
 
   // ----------------------------------------------------------------------
-  // Process single page (ink rendered with containers, downsampled)
+  // Process a single page (smooth ink, proper highlight transparency)
   // ----------------------------------------------------------------------
   static Future<void> _processPage({
     required pw.Document doc,
@@ -231,14 +210,13 @@ class PdfSaveService {
     final page = src.pages[pageIndex];
     final pageArea = pageW * pageH;
 
-    // Aggressive render scale
+    // Adaptive render scale based on pixel limit
     double renderScale;
-    if (pageArea < 500000) {
-      renderScale = 1.5;
-    } else if (pageArea < 2000000) {
-      renderScale = 1.2;
-    } else {
+    if (pageArea <= _maxRenderedPixels) {
       renderScale = 1.0;
+    } else {
+      renderScale = math.sqrt(_maxRenderedPixels / pageArea);
+      renderScale = renderScale.clamp(0.3, 1.0);
     }
 
     pdfr.PdfImage? pdfImg;
@@ -260,61 +238,126 @@ class PdfSaveService {
         child: pw.Image(pageImage, width: pageW, height: pageH, fit: pw.BoxFit.fill),
       ));
 
-      // Highlights / underlines / strikethrough
-      for (final r in rectAnnotations[pageIndex] ?? []) {
-        final l = r.normRect.left * pageW;
-        final t = r.normRect.top * pageH;
-        final w = r.normRect.width * pageW;
-        final h = r.normRect.height * pageH;
-        switch (r.type) {
-          case AnnotationType.highlight:
-            overlays.add(pw.Positioned(left: l, top: t,
-                child: pw.Container(width: w, height: h, color: _pdfColor(r.color, opacity: 0.4))));
-            break;
-          case AnnotationType.underline:
-            overlays.add(pw.Positioned(left: l, top: t + h - 1.5,
-                child: pw.Container(width: w, height: 1.5, color: _pdfColor(r.color))));
-            break;
-          case AnnotationType.strikethrough:
-            overlays.add(pw.Positioned(left: l, top: t + h / 2 - 0.75,
-                child: pw.Container(width: w, height: 1.5, color: _pdfColor(r.color))));
-            break;
-          default: break;
-        }
-      }
+  // ===== HIGHLIGHTS, UNDERLINES, STRIKETHROUGH =====
+  for (final r in rectAnnotations[pageIndex] ?? []) {
+    final l = r.normRect.left * pageW;
+    final t = r.normRect.top * pageH;
+    final w = r.normRect.width * pageW;
+    final h = r.normRect.height * pageH;
+    switch (r.type) {
+      case AnnotationType.highlight:
+        final baseColor = PdfColor.fromInt(r.color.value);
 
-      // Ink annotations – simple container per segment (downsampled)
-      final ink = inkAnnotations[pageIndex];
-      if (ink != null) {
-        for (final stroke in ink.strokes) {
-          final points = stroke.points;
-          // Downsample to reduce number of widgets
-          for (int k = 0; k < points.length - 1; k++) {
-            final a = points[k];
-            final b = points[k + 1];
-            final x1 = a.dx * pageW;
-            final y1 = a.dy * pageH;
-            final x2 = b.dx * pageW;
-            final y2 = b.dy * pageH;
-            final left = x1 < x2 ? x1 : x2;
-            final top = y1 < y2 ? y1 : y2;
-            final width = (x1 - x2).abs() + (stroke.normWidth * pageW);
-            final height = (y1 - y2).abs() + (stroke.normWidth * pageW);
-            if (width > 0.5 || height > 0.5) {
-              overlays.add(pw.Positioned(
-                left: left, top: top,
-                child: pw.Container(
-                  width: width < 1 ? 1 : width,
-                  height: height < 1 ? 1 : height,
-                  color: _pdfColor(stroke.color),
-                ),
-              ));
-            }
-          }
-        }
-      }
+        // ✅ FIX: Use pw.Opacity wrapper to force the PDF engine to allow transparency
+        overlays.add(pw.Positioned(
+          left: l, top: t,
+          child: pw.Opacity(
+            opacity: 0.4,
+            child: pw.Container(
+              width: w,
+              height: h,
+              color: baseColor,
+            ),
+          ),
+        ));
+        break;
+      case AnnotationType.underline:
+        overlays.add(pw.Positioned(
+          left: l, top: t + h - 1.5,
+          child: pw.Container(width: w, height: 1.5, color: _pdfColor(r.color)),
+        ));
+        break;
+      case AnnotationType.strikethrough:
+        overlays.add(pw.Positioned(
+          left: l, top: t + h / 2 - 0.75,
+          child: pw.Container(width: w, height: 1.5, color: _pdfColor(r.color)),
+        ));
+        break;
+      default: break;
+    }
+  }
 
-      // Sticky notes
+  // ===== INK ANNOTATIONS – SMOOTH QUADRATIC BEZIER =====
+  final ink = inkAnnotations[pageIndex];
+  if (ink != null) {
+    for (final stroke in ink.strokes) {
+      final points = stroke.points;
+      if (points.isEmpty) continue; 
+
+      double strokeWidth;
+      if (stroke.normWidth > 1.0) {
+        strokeWidth = stroke.normWidth.clamp(0.5, 12.0);
+      } else {
+        strokeWidth = (stroke.normWidth * pageW) / 72;
+        strokeWidth = strokeWidth.clamp(0.5, 12.0);
+      }
+      
+      final drawColor = _pdfColor(stroke.color);
+
+      overlays.add(
+        pw.Positioned(
+          left: 0, 
+          top: 0,
+          child: pw.SizedBox(
+            width: pageW,
+            height: pageH,
+            child: pw.CustomPaint(
+              painter: (canvas, size) {
+                // ✅ FIX: Move context setup cleanly between save/restore blocks
+                canvas.saveContext();
+                
+                canvas
+                  ..setStrokeColor(drawColor)
+                  ..setFillColor(drawColor) 
+                  ..setLineWidth(strokeWidth)
+                  ..setLineCap(PdfLineCap.round)
+                  ..setLineJoin(PdfLineJoin.round);
+
+                final List<({double x, double y})> pdfPoints = points.map((p) => (
+                  x: p.dx * pageW,
+                  y: p.dy * pageH, 
+                )).toList();
+
+                if (pdfPoints.length == 1) {
+                  canvas.drawEllipse(pdfPoints[0].x, pdfPoints[0].y, strokeWidth / 2, strokeWidth / 2);
+                  canvas.fillPath();
+                } else if (pdfPoints.length == 2) {
+                  canvas.moveTo(pdfPoints[0].x, pdfPoints[0].y);
+                  canvas.lineTo(pdfPoints[1].x, pdfPoints[1].y);
+                  canvas.strokePath();
+                } else {
+                  canvas.moveTo(pdfPoints[0].x, pdfPoints[0].y);
+                  
+                  final firstMidX = (pdfPoints[0].x + pdfPoints[1].x) / 2;
+                  final firstMidY = (pdfPoints[0].y + pdfPoints[1].y) / 2;
+                  canvas.lineTo(firstMidX, firstMidY);
+
+                  for (int i = 1; i < pdfPoints.length - 1; i++) {
+                    final current = pdfPoints[i];
+                    final next = pdfPoints[i + 1];
+                    final midX = (current.x + next.x) / 2;
+                    final midY = (current.y + next.y) / 2;
+                    
+                    canvas.curveTo(current.x, current.y, current.x, current.y, midX, midY);
+                  }
+                  
+                  final last = pdfPoints.last;
+                  canvas.lineTo(last.x, last.y);
+                  canvas.strokePath(); 
+                }
+                
+                canvas.restoreContext();
+              },
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+
+
+      // ===== STICKY NOTES =====
       for (final note in stickyNotes[pageIndex] ?? []) {
         final x = note.normPosition.dx * pageW;
         final y = note.normPosition.dy * pageH;
@@ -328,7 +371,7 @@ class PdfSaveService {
         ));
       }
 
-      // Signatures
+      // ===== SIGNATURES =====
       for (final sig in signatures[pageIndex] ?? []) {
         final x = sig.normPosition.dx * pageW;
         final y = sig.normPosition.dy * pageH;
@@ -340,7 +383,7 @@ class PdfSaveService {
         ));
       }
 
-      // Text stamps
+      // ===== TEXT STAMPS =====
       for (final stamp in textStamps[pageIndex] ?? []) {
         final x = stamp.normPosition.dx * pageW;
         final y = stamp.normPosition.dy * pageH;
@@ -350,7 +393,7 @@ class PdfSaveService {
         ));
       }
 
-      // Text edits
+      // ===== TEXT EDITS =====
       for (final textEdit in textEdits[pageIndex] ?? []) {
         final x = textEdit.normPosition.dx * pageW;
         final y = textEdit.normPosition.dy * pageH;
@@ -364,7 +407,7 @@ class PdfSaveService {
         ));
       }
 
-      // Redactions
+      // ===== REDACTIONS =====
       for (final r in redactions[pageIndex] ?? []) {
         overlays.add(pw.Positioned(
           left: r.normRect.left * pageW, top: r.normRect.top * pageH,
@@ -372,7 +415,7 @@ class PdfSaveService {
         ));
       }
 
-      // Bookmarks (borders)
+      // ===== BOOKMARKS (borders) =====
       for (final b in bookmarks[pageIndex] ?? []) {
         overlays.add(pw.Positioned(
           left: b.normRect.left * pageW, top: b.normRect.top * pageH,
@@ -397,21 +440,14 @@ class PdfSaveService {
   }
 
   // ----------------------------------------------------------------------
-  // PNG conversion (using PNG is fine)
+  // PNG conversion – optimized (no manual pixel shuffling)
   // ----------------------------------------------------------------------
   static Future<Uint8List?> _pdfImageToPng(pdfr.PdfImage img) async {
     try {
-      final pixels = img.pixels;
-      final convertedPixels = Uint8List(pixels.length);
-      for (int i = 0; i < pixels.length; i += 4) {
-        convertedPixels[i] = pixels[i + 2];
-        convertedPixels[i + 1] = pixels[i + 1];
-        convertedPixels[i + 2] = pixels[i];
-        convertedPixels[i + 3] = pixels[i + 3];
-      }
       final completer = Completer<ui.Image>();
-      ui.decodeImageFromPixels(convertedPixels, img.width, img.height,
-          ui.PixelFormat.rgba8888, (i) => completer.complete(i));
+      // Assume pdfrx gives BGRA format
+      ui.decodeImageFromPixels(img.pixels, img.width, img.height,
+          ui.PixelFormat.bgra8888, completer.complete);
       final uiImg = await completer.future;
       final byteData = await uiImg.toByteData(format: ui.ImageByteFormat.png);
       uiImg.dispose();
@@ -422,7 +458,7 @@ class PdfSaveService {
   }
 
   // ----------------------------------------------------------------------
-  // Audit page (using Column, not MultiPage – works fine)
+  // AUDIT PAGE (full implementation)
   // ----------------------------------------------------------------------
   static pw.Page _auditPage(
     List<SignatureOverlay> sigs,
@@ -441,7 +477,6 @@ class PdfSaveService {
       build: (_) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          // Header
           pw.Container(
             padding: const pw.EdgeInsets.all(16),
             decoration: _auditHeaderDecoration,

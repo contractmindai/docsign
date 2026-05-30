@@ -1,7 +1,7 @@
 name: docsign
 description: DocSign — Annotate, sign, scan and edit documents. 100% offline.
 publish_to: 'none'
-version: 1.0.0+2
+version: 1.0.0+5
 
 environment:
   sdk: '>=3.2.0 <4.0.0'

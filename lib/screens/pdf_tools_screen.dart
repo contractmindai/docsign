@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -15,6 +16,7 @@ import 'package:image/image.dart' as img;
 
 import '../utils/platform_file_service.dart';
 import '../widgets/ds.dart';
+import '../widgets/apple_dialog.dart';
 
 class PdfToolsScreen extends StatefulWidget {
   final String filePath;
@@ -90,7 +92,6 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
     return name;
   }
 
-  // Pop tools screen and return result to viewer
   void _finish(Uint8List bytes, String name) async {
     final path = await _saveOutput(bytes, name);
     if (mounted) {
@@ -104,15 +105,15 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
   Future<bool> _checkSize(String op, {int warn = 20, int max = 80}) async {
     if (_pageCount <= warn) return true;
     if (_pageCount > max) { _snack('Max $max pages', err: true); return false; }
-    return await showDialog<bool>(context: context, builder: (_) => AlertDialog(
-      backgroundColor: DS.bgCard,
-      title: const Text('Large Document', style: TextStyle(color: Colors.white)),
-      content: Text('$_pageCount pages. $op may be slow.', style: const TextStyle(color: Colors.white70)),
+    return await AppleDialog.show<bool>(
+      context: context,
+      title: 'Large Document',
+      content: '$_pageCount pages. $op may be slow.',
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(context, true), style: FilledButton.styleFrom(backgroundColor: DS.indigo), child: const Text('Continue'))
+        AppleDialogAction(label: 'Cancel', onPressed: () => Navigator.pop(context, false)),
+        AppleDialogAction(label: 'Continue', onPressed: () => Navigator.pop(context, true)),
       ],
-    )) ?? false;
+    ) ?? false;
   }
 
   // ═══ MERGE ═══
@@ -143,7 +144,7 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
       }
       final bytes = Uint8List.fromList(await merged.save());
       if (mounted) {
-        Navigator.pop(context); // close progress
+        Navigator.pop(context);
         _finish(bytes, 'merged_${DateTime.now().millisecondsSinceEpoch}.pdf');
       }
     } catch (e) {
@@ -175,8 +176,10 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
     }
   }
 
-  // ═══ ROTATE (high quality) ═══
- Future<void> _rotateSelected() async {
+// ═══ ROTATE (FIXED: uses Transform.rotate for reliable 90° rotation) ═══
+// ═══ ROTATE (pixel‑based, no widget transform) ═══
+// ═══ ROTATE (pixel‑based, no widget transform) ═══
+Future<void> _rotateSelected() async {
   if (_doc == null || _selectedPages.isEmpty) {
     _snack('Select pages', err: true);
     return;
@@ -191,10 +194,9 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
       final page = _doc!.pages[i];
       final bool shouldRotate = _selectedPages.contains(i);
 
-      // 1) Clamp render size to avoid gigantic bitmaps
-    final renderWidth  = (page.width  * 1.5).clamp(0.0, 2500.0);
-    final renderHeight = (page.height * 1.5).clamp(0.0, 3500.0);
-
+      // Render at high quality
+      final renderWidth = (page.width * 2).clamp(0.0, 3000.0);
+      final renderHeight = (page.height * 2).clamp(0.0, 4000.0);
       final rendered = await page.render(
         fullWidth: renderWidth,
         fullHeight: renderHeight,
@@ -202,35 +204,32 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
       );
       if (rendered == null) continue;
 
-      final png = await _pdfImageToPng(rendered);
+      Uint8List? png = await _pdfImageToPng(rendered);
       if (png == null) continue;
 
-      // 2) Rotate only the selected pages, using a robust helper
-      final finalImage = shouldRotate
-          ? await _rotateImageBytes(png, 90)
-          : png;
+      // Rotate the image bytes if needed
+      if (shouldRotate) {
+        png = await _rotateImage90(png!);
+      }
 
-      // 3) Use BoxFit.contain – no explicit width/height → no stretching
+      // Swap page dimensions for rotated pages
+      final pageFormat = shouldRotate
+          ? PdfPageFormat(page.height, page.width)
+          : PdfPageFormat(page.width, page.height);
+
       doc.addPage(
         pw.Page(
-          pageFormat: shouldRotate
-              ? PdfPageFormat(page.height, page.width)
-              : PdfPageFormat(page.width, page.height),
+          pageFormat: pageFormat,
           margin: pw.EdgeInsets.zero,
-          build: (_) => pw.Center(
-            child: pw.Image(
-              pw.MemoryImage(finalImage),
-              fit: pw.BoxFit.contain,
-            ),
-          ),
+          build: (_) => pw.Image(pw.MemoryImage(png!), fit: pw.BoxFit.fill),
         ),
       );
     }
 
     final bytes = Uint8List.fromList(await doc.save());
     if (mounted) {
-      Navigator.pop(context);               // close progress
-      _finish(bytes, 'rotated.pdf');        // return to viewer
+      Navigator.pop(context);
+      _finish(bytes, 'rotated.pdf');
     }
   } catch (e) {
     if (mounted) {
@@ -240,69 +239,98 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
   }
 }
 
- Future<Uint8List> _rotateImageBytes(Uint8List png, int angle) async {
-  try {
-    final original = img.decodeImage(png);
-    if (original == null) {
-      return png;
-    }
+// Helper: rotate PNG bytes 90° clockwise
+Future<Uint8List> _rotateImage90(Uint8List bytes) async {
+  final codec = await ui.instantiateImageCodec(bytes);
+  final frame = await codec.getNextFrame();
+  final image = frame.image;
 
-    // image package rotates COUNTER‑clockwise by default,
-    // so to rotate CLOCKWISE 90° we pass 90 (not -90).
-    final rotated = img.copyRotate(original, angle: angle);
-    return Uint8List.fromList(img.encodePng(rotated));
-  } catch (e) {
-    return png;
-  }
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+
+  // Move canvas origin to top‑right and rotate 90° clockwise
+  canvas.translate(image.height.toDouble(), 0);
+  canvas.rotate(1.5708); // π/2 radians = 90°
+  canvas.drawImage(image, Offset.zero, Paint());
+
+  final picture = recorder.endRecording();
+  final rotatedImage = await picture.toImage(image.height, image.width);
+  final byteData = await rotatedImage.toByteData(format: ui.ImageByteFormat.png);
+  rotatedImage.dispose();
+  image.dispose();
+
+  return byteData!.buffer.asUint8List();
 }
 
-  // ═══ WATERMARK with color picker ═══
+  // ═══ WATERMARK ═══
   Future<void> _addWatermark() async {
     if (_doc == null) return;
     if (!await _checkSize('Watermarking', warn: 25, max: 80)) return;
     final ctrl = TextEditingController(text: _watermarkText);
     bool applyAll = true;
     Color selectedColor = Colors.red;
-    final input = await showDialog<Map>(context: context, builder: (_) => StatefulBuilder(
-      builder: (__, setSt) => AlertDialog(
-        backgroundColor: DS.bgCard,
-        title: const Text('Watermark', style: TextStyle(color: Colors.white)),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: ctrl, autofocus: true, style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(hintText: 'e.g. CONFIDENTIAL', filled: true, fillColor: DS.bgCard2, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)))),
-          const SizedBox(height: 12),
-          Row(children: [
-            const Text('Color:', style: TextStyle(color: Colors.white60)),
-            const SizedBox(width: 12),
-            GestureDetector(
-              onTap: () async {
-                final color = await showDialog<Color>(context: context,
-                  builder: (ctx) => SimpleDialog(backgroundColor: DS.bgCard, title: const Text('Choose Color', style: TextStyle(color: Colors.white)), children: [
-                    _colorOption(ctx, Colors.red, 'Red'), _colorOption(ctx, Colors.blue, 'Blue'),
-                    _colorOption(ctx, Colors.green, 'Green'), _colorOption(ctx, Colors.black, 'Black'),
-                    _colorOption(ctx, Colors.purple, 'Purple'),
-                  ]));
-                if (color != null) setSt(() => selectedColor = color);
-              },
-              child: Container(width: 32, height: 32, decoration: BoxDecoration(color: selectedColor, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2))),
+    
+    final input = await AppleDialog.show<Map>(
+      context: context,
+      title: 'Watermark',
+      child: StatefulBuilder(
+        builder: (__, setSt) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: 'e.g. CONFIDENTIAL',
+                filled: true,
+                fillColor: DS.bgCard2,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
             ),
-          ]),
-          const SizedBox(height: 12),
-          Row(children: [
-            const Text('Apply:', style: TextStyle(color: Colors.white60)),
-            const Spacer(),
-            ChoiceChip(label: const Text('All'), selected: applyAll, onSelected: (_) => setSt(() => applyAll = true)),
-            const SizedBox(width: 8),
-            ChoiceChip(label: Text('Sel (${_selectedPages.length})'), selected: !applyAll, onSelected: (_) => setSt(() => applyAll = false)),
-          ]),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: Colors.white70))),
-          FilledButton(onPressed: () => Navigator.pop(context, {'text': ctrl.text, 'all': applyAll, 'color': selectedColor}),
-              style: FilledButton.styleFrom(backgroundColor: DS.indigo), child: const Text('Apply')),
-        ],
+            const SizedBox(height: 16),
+            Row(children: [
+              const Text('Text Color:', style: TextStyle(color: Colors.white60)),
+              const SizedBox(width: 12),
+              ..._buildTextColorSwatches(selectedColor, (color) {
+                setSt(() => selectedColor = color);
+              }),
+            ]),
+            const SizedBox(height: 16),
+            Row(children: [
+              const Text('Apply:', style: TextStyle(color: Colors.white60)),
+              const Spacer(),
+              ChoiceChip(
+                label: const Text('All'),
+                selected: applyAll,
+                onSelected: (_) => setSt(() => applyAll = true),
+                backgroundColor: Colors.white10,
+                selectedColor: DS.indigo.withOpacity(0.3),
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: Text('Selected (${_selectedPages.length})'),
+                selected: !applyAll,
+                onSelected: (_) => setSt(() => applyAll = false),
+                backgroundColor: Colors.white10,
+                selectedColor: DS.indigo.withOpacity(0.3),
+              ),
+            ]),
+          ],
+        ),
       ),
-    ));
+      actions: [
+        AppleDialogAction(label: 'Cancel', onPressed: () => Navigator.pop(context)),
+        AppleDialogAction(
+          label: 'Apply',
+          onPressed: () => Navigator.pop(context, {'text': ctrl.text, 'all': applyAll, 'color': selectedColor}),
+        ),
+      ],
+    );
+    
     if (input == null || input['text'].toString().isEmpty) return;
     _showProgress('Watermarking...');
     try {
@@ -334,10 +362,37 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
     }
   }
 
-  Widget _colorOption(BuildContext ctx, Color color, String label) => SimpleDialogOption(
-    child: Row(children: [Container(width: 40, height: 40, color: color), const SizedBox(width: 12), Text(label, style: const TextStyle(color: Colors.white))]),
-    onPressed: () => Navigator.pop(ctx, color),
-  );
+  List<Widget> _buildTextColorSwatches(Color current, ValueChanged<Color> onChanged) {
+    final colors = [
+      Colors.red, Colors.blue, Colors.green, Colors.black,
+      Colors.purple, Colors.orange, DS.indigo, Colors.white,
+    ];
+    return colors.map((c) {
+      final isSelected = c == current;
+      return GestureDetector(
+        onTap: () => onChanged(c),
+        child: Container(
+          margin: const EdgeInsets.only(right: 8),
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: isSelected ? Border.all(color: DS.indigo, width: 2) : null,
+          ),
+          child: Center(
+            child: Text(
+              'A',
+              style: TextStyle(
+                color: c,
+                fontWeight: FontWeight.bold,
+                fontSize: 20,
+              ),
+            ),
+          ),
+        ),
+      );
+    }).toList();
+  }
 
   // ═══ DUPLICATE ═══
   Future<void> _duplicatePage(int pageIndex) async {
@@ -369,15 +424,32 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
   Future<void> _addQrCode() async {
     if (_doc == null) return;
     final ctrl = TextEditingController();
-    final text = await showDialog<String>(context: context, builder: (_) => AlertDialog(
-      backgroundColor: DS.bgCard,
-      title: const Text('QR Code', style: TextStyle(color: Colors.white)),
-      content: TextField(controller: ctrl, autofocus: true, style: const TextStyle(color: Colors.white), decoration: InputDecoration(hintText: 'URL or payment link', filled: true, fillColor: DS.bgCard2, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)))),
+    final text = await AppleDialog.show<String>(
+      context: context,
+      title: 'QR Code',
+      child: TextField(
+        controller: ctrl,
+        autofocus: true,
+        style: const TextStyle(color: Colors.white, fontSize: 14),
+        decoration: InputDecoration(
+          hintText: 'URL or payment link',
+          filled: true,
+          fillColor: DS.bgCard2,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(context, ctrl.text), style: FilledButton.styleFrom(backgroundColor: DS.green), child: const Text('Generate'))
+        AppleDialogAction(label: 'Cancel', onPressed: () => Navigator.pop(context)),
+        AppleDialogAction(
+          label: 'Generate',
+          onPressed: () => Navigator.pop(context, ctrl.text),
+          isDestructive: false,
+        ),
       ],
-    ));
+    );
     if (text == null || text.isEmpty) return;
     _showProgress('Adding QR...');
     try {
@@ -413,11 +485,26 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
   }
 
   void _showProgress(String m) => showDialog(
-    context: context, barrierDismissible: false,
-    builder: (_) => AlertDialog(backgroundColor: DS.bgCard, content: Row(children: [
-      const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: DS.indigo)),
-      const SizedBox(width: 16), Text(m, style: const TextStyle(color: Colors.white))
-    ])),
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => Center(
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: DS.bgCard,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 20)],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(width: 30, height: 30, child: CircularProgressIndicator(strokeWidth: 2, color: DS.indigo)),
+            const SizedBox(height: 12),
+            Text(m, style: const TextStyle(color: Colors.white, fontSize: 14)),
+          ],
+        ),
+      ),
+    ),
   );
 
   Future<Uint8List?> _pdfImageToPng(pdfrx.PdfImage img) async {
@@ -440,6 +527,7 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
       content: Text(m, style: const TextStyle(color: Colors.white, fontSize: 13)),
       backgroundColor: err ? DS.red : DS.bgCard2,
       behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       duration: const Duration(seconds: 2),
     ));
   }
@@ -450,8 +538,13 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: DS.bg,
     appBar: AppBar(
-      backgroundColor: DS.bgCard, elevation: 0, surfaceTintColor: Colors.transparent,
-      leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20), onPressed: () => Navigator.pop(context)),
+      backgroundColor: DS.bgCard, 
+      elevation: 0, 
+      surfaceTintColor: Colors.transparent,
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20), 
+        onPressed: () => Navigator.pop(context),
+      ),
       title: Text('PDF Tools', style: GoogleFonts.inter(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
       centerTitle: true,
     ),
@@ -479,11 +572,24 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
     ]),
   );
 
-  Widget _card(String l, IconData i, Color c, VoidCallback t) => GestureDetector(
+  Widget _card(String l, IconData i, Color c, VoidCallback t) => ScaleTap(
     onTap: t,
-    child: Container(width: 105, padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: c.withOpacity(0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: c.withOpacity(0.3))),
-      child: Column(children: [Icon(i, color: c, size: 28), const SizedBox(height: 6), Text(l, style: TextStyle(color: c, fontSize: 11, fontWeight: FontWeight.w600), textAlign: TextAlign.center)]),
+    child: Container(
+      width: 105, padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [c.withOpacity(0.12), c.withOpacity(0.05)],
+        ),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        border: Border.all(color: c.withOpacity(0.2)),
+      ),
+      child: Column(children: [
+        Icon(i, color: c, size: 28),
+        const SizedBox(height: 6),
+        Text(l, style: TextStyle(color: c, fontSize: 11, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
+      ]),
     ),
   );
 
@@ -498,12 +604,14 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
         if (!_pageThumbnails.containsKey(i)) {
           WidgetsBinding.instance.addPostFrameCallback((_) => _loadPageThumbnail(i));
         }
-        return GestureDetector(
+        return InkWell(
           onTap: () => _toggle(i),
           onLongPress: () => _duplicatePage(i),
+          borderRadius: BorderRadius.circular(8),
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.white, borderRadius: BorderRadius.circular(8),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
               border: Border.all(color: sel ? DS.indigo : Colors.grey.withOpacity(0.2), width: sel ? 2.5 : 1),
             ),
             child: Stack(children: [
@@ -529,7 +637,21 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
     child: Row(children: [
       Text('${_selectedPages.length} selected', style: const TextStyle(color: Colors.white, fontSize: 13)),
       const Spacer(),
-      PrimaryButton(label: 'Extract', icon: Icons.content_cut_rounded, onTap: _extractPages, height: 38)
+      ScaleTap(
+        onTap: _extractPages,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: DS.indigo,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(children: [
+            const Icon(Icons.content_cut_rounded, size: 16, color: Colors.white),
+            const SizedBox(width: 6),
+            const Text('Extract', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+          ]),
+        ),
+      ),
     ]),
   );
 

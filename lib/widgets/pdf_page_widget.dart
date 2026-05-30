@@ -44,6 +44,7 @@ class PdfPageWidget extends StatefulWidget {
   final void Function(RedactionRect) onRedactionAdded;
   final void Function(ClauseBookmark) onBookmarkAdded;
   final void Function(TextEditAnnotation) onTextEditAdded;
+  final void Function(Rect) onHighlightTapped;
 
   const PdfPageWidget({
     super.key,
@@ -76,6 +77,7 @@ class PdfPageWidget extends StatefulWidget {
     required this.onRedactionAdded,
     required this.onBookmarkAdded,
     required this.onTextEditAdded,
+    required this.onHighlightTapped,
   });
 
   @override
@@ -167,7 +169,6 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
         return;
       }
 
-      // BGRA → RGBA conversion (preserves correct colours on all platforms)
       final pixels = pdfImage.pixels;
       final convertedPixels = Uint8List(pixels.length);
       for (int i = 0; i < pixels.length; i += 4) {
@@ -222,6 +223,8 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
 
   Offset _norm(Offset local, Size size) =>
       Offset(local.dx / size.width, local.dy / size.height);
+  Rect _dn(Rect n, double w, double h) =>
+      Rect.fromLTWH(n.left * w, n.top * h, n.width * w, n.height * h);
 
   bool get _isRectTool =>
       widget.tool == AnnotationTool.highlight ||
@@ -251,30 +254,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
   void _onTap(TapDownDetails d, Size size) {
     final norm = _norm(d.localPosition, size);
 
-    if (widget.tool == AnnotationTool.textStamp) {
-      _showTextEditor(context, norm);
-      return;
-    }
-
-    if (widget.pendingSignature != null) {
-      widget.onSignaturePlaced(
-        SignatureOverlay(
-          id: UniqueKey().toString(),
-          imageBytes: widget.pendingSignature!,
-          pageIndex: widget.pageIndex,
-          normPosition: Offset(
-            (norm.dx - 0.175).clamp(0.0, 0.65),
-            (norm.dy - 0.035).clamp(0.0, 0.93),
-          ),
-          normSize: widget.isInitialMode
-              ? const Size(0.18, 0.05)
-              : const Size(0.38, 0.08),
-          isInitials: widget.isInitialMode,
-        ),
-      );
-      return;
-    }
-
+    // Sticky notes check
     for (final note in widget.notes) {
       final nx = note.normPosition.dx * size.width;
       final ny = note.normPosition.dy * size.height;
@@ -284,8 +264,43 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
       }
     }
 
-    if (widget.tool == AnnotationTool.stickyNote) {
-      _showNoteDialog(context, norm);
+    // Zoom to highlight
+    for (final r in widget.rects) {
+      if (r.type != AnnotationType.highlight) continue;
+      final rect = _dn(r.normRect, size.width, size.height);
+      if (rect.contains(d.localPosition)) {
+        widget.onHighlightTapped(r.normRect);
+        return;
+      }
+    }
+
+    // Annotation tools
+    if (_annotating) {
+      if (widget.tool == AnnotationTool.textStamp) {
+        _showTextEditor(context, norm);
+        return;
+      }
+      if (widget.pendingSignature != null) {
+        widget.onSignaturePlaced(
+          SignatureOverlay(
+            id: UniqueKey().toString(),
+            imageBytes: widget.pendingSignature!,
+            pageIndex: widget.pageIndex,
+            normPosition: Offset(
+              (norm.dx - 0.175).clamp(0.0, 0.65),
+              (norm.dy - 0.035).clamp(0.0, 0.93),
+            ),
+            normSize: widget.isInitialMode
+                ? const Size(0.18, 0.05)
+                : const Size(0.38, 0.08),
+            isInitials: widget.isInitialMode,
+          ),
+        );
+        return;
+      }
+      if (widget.tool == AnnotationTool.stickyNote) {
+        _showNoteDialog(context, norm);
+      }
     }
 
     setState(() => _selectedSigId = null);
@@ -317,6 +332,56 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
         ),
       ),
     );
+  }
+
+  Future<void> _showNoteDialog(BuildContext ctx, Offset normPos) async {
+    final ctrl = TextEditingController();
+    final text = await showDialog<String>(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        backgroundColor: DS.bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Add Note', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLines: 4,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Type your note…',
+            hintStyle: const TextStyle(color: Colors.white38),
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.07),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: Colors.white12),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            style: FilledButton.styleFrom(backgroundColor: DS.indigo),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+    if (text != null && text.trim().isNotEmpty) {
+      widget.onNoteAdded(
+        StickyNote(
+          id: UniqueKey().toString(),
+          pageIndex: widget.pageIndex,
+          normPosition: normPos,
+          text: text.trim(),
+          color: const Color(0xFFFB923C),
+        ),
+      );
+    }
   }
 
   void _onPanStart(DragStartDetails d, Size size) {
@@ -390,56 +455,6 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
         _dragStart = null;
         _dragCurrent = null;
       });
-    }
-  }
-
-  Future<void> _showNoteDialog(BuildContext ctx, Offset normPos) async {
-    final ctrl = TextEditingController();
-    final text = await showDialog<String>(
-      context: ctx,
-      builder: (_) => AlertDialog(
-        backgroundColor: DS.bgCard,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Add Note', style: TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          maxLines: 4,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            hintText: 'Type your note…',
-            hintStyle: const TextStyle(color: Colors.white38),
-            filled: true,
-            fillColor: Colors.white.withOpacity(0.07),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Colors.white12),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text),
-            style: FilledButton.styleFrom(backgroundColor: DS.indigo),
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
-    if (text != null && text.trim().isNotEmpty) {
-      widget.onNoteAdded(
-        StickyNote(
-          id: UniqueKey().toString(),
-          pageIndex: widget.pageIndex,
-          normPosition: normPos,
-          text: text.trim(),
-          color: const Color(0xFFFB923C),
-        ),
-      );
     }
   }
 
@@ -589,18 +604,27 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
 
     final displayH = widget.displayWidth / _pageAspect;
 
-    // InteractiveViewer provides smooth zoom/pan.
-    // The child is sized exactly to the viewport, so it starts perfectly centred
-    // at scale 1.0. BoxFit.fill fills it without distortion.
-    return InteractiveViewer(
-      transformationController: _transformationController,
-      minScale: 1.0,                // prevents zooming out beyond the fitted view
-      maxScale: 5.0,
-      boundaryMargin: EdgeInsets.zero,
-      child: SizedBox(
-        width: widget.displayWidth,
-        height: displayH,
-        child: RepaintBoundary(
+    return GestureDetector(
+      onDoubleTap: () {
+        if (_transformationController.value.getMaxScaleOnAxis() > 1.0) {
+          _transformationController.value = Matrix4.identity();
+        } else {
+          final center = Offset(widget.displayWidth / 2, displayH / 2);
+          final newMatrix = Matrix4.identity()
+            ..translate(center.dx, center.dy)
+            ..scale(2.0)
+            ..translate(-center.dx, -center.dy);
+          _transformationController.value = newMatrix;
+        }
+      },
+      child: InteractiveViewer(
+        transformationController: _transformationController,
+        minScale: 1.0,
+        maxScale: 5.0,
+        boundaryMargin: EdgeInsets.zero,
+        child: SizedBox(
+          width: widget.displayWidth,
+          height: displayH,
           child: RawImage(
             image: _pageImage,
             fit: BoxFit.fill,
@@ -625,9 +649,8 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
       );
     }
     return GestureDetector(
-      // Opaque when annotating (prevents zoom/pan), translucent otherwise (lets touch pass through)
-      behavior: _annotating ? HitTestBehavior.opaque : HitTestBehavior.translucent,
-      onTapDown: _annotating ? (d) => _onTap(d, size) : null,
+      behavior: HitTestBehavior.translucent,
+      onTapDown: (d) => _onTap(d, size),
       onPanStart: _annotating ? (d) => _onPanStart(d, size) : null,
       onPanUpdate: _annotating ? (d) => _onPanUpdate(d, size) : null,
       onPanEnd: _annotating ? (d) => _onPanEnd(d, size) : null,
@@ -651,9 +674,10 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
     );
   }
 
+  // ✅ IMPROVED SIGNATURE OVERLAY – larger handles, better placement
   Widget _buildSigOverlay(SignatureOverlay sig, Size pageSize) {
     final isSel = sig.id == _selectedSigId;
-    const hs = 24.0;
+    const handleSize = 32.0; // Larger, easier to tap
     return Positioned(
       left: sig.normPosition.dx * pageSize.width,
       top: sig.normPosition.dy * pageSize.height,
@@ -676,28 +700,30 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
               height: sig.normSize.height * pageSize.height,
               decoration: BoxDecoration(
                 border: Border.all(color: isSel ? DS.indigo : Colors.transparent, width: 2.0),
-                borderRadius: BorderRadius.circular(3),
+                borderRadius: BorderRadius.circular(4),
               ),
               child: Image.memory(sig.imageBytes, fit: BoxFit.contain),
             ),
             if (isSel) ...[
+              // Delete button (top-left)
               Positioned(
-                top: -hs / 2,
-                right: -hs / 2,
+                top: -handleSize / 2,
+                left: -handleSize / 2,
                 child: _Handle(
                   icon: Icons.close_rounded,
                   color: DS.red,
-                  size: hs,
+                  size: handleSize,
                   onTap: () => widget.onSignatureDeleted(sig.id),
                 ),
               ),
+              // Resize handle (bottom-right)
               Positioned(
-                bottom: -hs / 2,
-                right: -hs / 2,
+                bottom: -handleSize / 2,
+                right: -handleSize / 2,
                 child: _Handle(
                   icon: Icons.open_in_full_rounded,
                   color: DS.indigo,
-                  size: hs,
+                  size: handleSize,
                   onPan: (d) => widget.onSignatureResized(
                     sig.id,
                     Size(
@@ -743,7 +769,7 @@ class _Handle extends StatelessWidget {
         decoration: BoxDecoration(
           color: color,
           shape: BoxShape.circle,
-          boxShadow: [BoxShadow(color: color.withOpacity(0.4), blurRadius: 6)],
+          boxShadow: [BoxShadow(color: color.withOpacity(0.4), blurRadius: 8)],
         ),
         child: Icon(icon, size: size * 0.55, color: Colors.white),
       ),
