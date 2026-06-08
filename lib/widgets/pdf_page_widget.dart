@@ -10,6 +10,7 @@ import '../models/annotation.dart';
 import 'annotation_painter.dart';
 import 'ds.dart';
 import 'text_editor_overlay.dart';
+import '../utils/app_localizations.dart'; // for AppLocalizations
 
 final _renderSem = _Semaphore(1);
 
@@ -252,6 +253,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
       widget.tool != AnnotationTool.view || widget.pendingSignature != null;
 
   void _onTap(TapDownDetails d, Size size) {
+    final l10n = AppLocalizations.of(context)!;
     final norm = _norm(d.localPosition, size);
 
     // Sticky notes check
@@ -307,6 +309,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
   }
 
   void _showTextEditor(BuildContext ctx, Offset normPos) {
+    final l10n = AppLocalizations.of(ctx)!;
     showDialog(
       context: ctx,
       builder: (dialogCtx) => AlertDialog(
@@ -335,20 +338,21 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
   }
 
   Future<void> _showNoteDialog(BuildContext ctx, Offset normPos) async {
+    final l10n = AppLocalizations.of(ctx)!;
     final ctrl = TextEditingController();
     final text = await showDialog<String>(
       context: ctx,
       builder: (_) => AlertDialog(
         backgroundColor: DS.bgCard,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Add Note', style: TextStyle(color: Colors.white)),
+        title: Text(l10n.addNoteTitle, style: const TextStyle(color: Colors.white)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           maxLines: 4,
           style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
-            hintText: 'Type your note…',
+            hintText: l10n.addNoteHint,
             hintStyle: const TextStyle(color: Colors.white38),
             filled: true,
             fillColor: Colors.white.withOpacity(0.07),
@@ -361,12 +365,12 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
+            child: Text(l10n.cancel, style: const TextStyle(color: Colors.white38)),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, ctrl.text),
             style: FilledButton.styleFrom(backgroundColor: DS.indigo),
-            child: const Text('Add'),
+            child: Text(l10n.add),
           ),
         ],
       ),
@@ -459,6 +463,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
   }
 
   Future<void> _showBookmarkDialog(BuildContext ctx, Rect normRect) async {
+    final l10n = AppLocalizations.of(ctx)!;
     const labels = [
       'Payment Terms',
       'Liability',
@@ -475,7 +480,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
         builder: (c2, ss) => AlertDialog(
           backgroundColor: DS.bgCard,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Clause Label', style: TextStyle(color: Colors.white)),
+          title: Text(l10n.clauseLabelTitle, style: const TextStyle(color: Colors.white)),
           content: Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -496,7 +501,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(c2),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
+              child: Text(l10n.cancel, style: const TextStyle(color: Colors.white38)),
             ),
             FilledButton(
               onPressed: () {
@@ -513,7 +518,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
                 Navigator.pop(c2);
               },
               style: FilledButton.styleFrom(backgroundColor: DS.indigo),
-              child: const Text('Add'),
+              child: Text(l10n.add),
             ),
           ],
         ),
@@ -532,8 +537,8 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
           final size = Size(constraints.maxWidth, constraints.maxHeight);
           return Stack(
             children: [
-              Positioned.fill(child: _buildImage()),
-              Positioned.fill(child: _buildAnnotationLayer(size)),
+              Positioned.fill(child: _buildImage(context)),
+              Positioned.fill(child: _buildAnnotationLayer(context, size)),
               ...widget.signatures.map((s) => _buildSigOverlay(s, size)),
               ...widget.textEdits.map((t) => _buildTextEdit(t, size)),
             ],
@@ -560,7 +565,8 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
     );
   }
 
-  Widget _buildImage() {
+  Widget _buildImage(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     if (_loading) {
       return Container(
         color: Colors.white,
@@ -589,7 +595,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
                   _renderPage();
                 },
                 icon: const Icon(Icons.refresh_rounded, size: 14),
-                label: const Text('Retry'),
+                label: Text(l10n.retry),
                 style: FilledButton.styleFrom(
                   backgroundColor: DS.indigo.withOpacity(0.7),
                   visualDensity: VisualDensity.compact,
@@ -635,7 +641,8 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
     );
   }
 
-  Widget _buildAnnotationLayer(Size size) {
+  Widget _buildAnnotationLayer(BuildContext context, Size size) {
+    final l10n = AppLocalizations.of(context)!;
     Rect? draftNorm;
     if (_dragStart != null && _dragCurrent != null && _isRectTool) {
       draftNorm = Rect.fromPoints(_norm(_dragStart!, size), _norm(_dragCurrent!, size));
@@ -668,6 +675,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
             draftRect: draftNorm,
             draftType: widget.tool == AnnotationTool.redaction ? null : _rectType,
             draftColor: _toolColor,
+            redactedLabel: l10n.redacted,
           ),
         ),
       ),

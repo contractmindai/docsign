@@ -3,13 +3,15 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'screens/pdf_viewer_screen.dart';
 import 'screens/web_landing_screen.dart';
-import 'screens/home_screen.dart';
 import 'widgets/apple_dialog.dart';
+import 'screens/home_screen.dart';
+import 'utils/app_localizations.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -96,6 +98,23 @@ class _DocSignAppState extends State<DocSignApp> {
       title: 'DocSign',
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),
+      // ========== LOCALIZATION SUPPORT ==========
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('en'), Locale('es'), Locale('hi'), Locale('te'), Locale('fr'),
+      ],
+      localeResolutionCallback: (deviceLocale, supported) {
+        // Fallback to English if device locale not supported
+        if (deviceLocale != null && supported.any((l) => l.languageCode == deviceLocale.languageCode)) {
+          return deviceLocale;
+        }
+        return const Locale('en');
+      },
       home: const AppRoot(),
     );
   }

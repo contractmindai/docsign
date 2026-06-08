@@ -14,6 +14,7 @@ import '../utils/platform_file_service.dart';
 import '../widgets/ds.dart';
 import 'pdf_viewer_screen.dart';
 import '../services/pdf_save_service.dart';
+import '../utils/app_localizations.dart'; // for AppLocalizations
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: Unicode‑safe text style (uses Noto Sans fonts)
@@ -92,6 +93,7 @@ class _RequiredTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -105,10 +107,10 @@ class _RequiredTextField extends StatelessWidget {
             style: const TextStyle(color: DS.textPrimary, fontSize: 14),
             validator: (value) {
               if (value == null || value.trim().isEmpty) {
-                return 'This field is required';
+                return l10n.fieldRequired;
               }
               if (isEmail && !value.contains('@')) {
-                return 'Enter a valid email address';
+                return l10n.validEmail;
               }
               return null;
             },
@@ -135,6 +137,7 @@ class _DatePickerField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -239,6 +242,8 @@ class _TemplateGalleryState extends State<TemplateGallery> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final cats = ['All', l10n.hr, l10n.legal, l10n.finance, l10n.sales, l10n.admin, l10n.career];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -251,7 +256,7 @@ class _TemplateGalleryState extends State<TemplateGallery> {
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
-                    children: _cats.map((cat) => Padding(
+                    children: cats.map((cat) => Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: _FilterChip(label: cat, selected: _filter == cat, onTap: () => setState(() => _filter = cat)),
                     )).toList(),
@@ -262,7 +267,7 @@ class _TemplateGalleryState extends State<TemplateGallery> {
                 TextButton(
                   onPressed: () => setState(() => _filter = 'All'),
                   style: TextButton.styleFrom(foregroundColor: DS.indigo),
-                  child: const Text('Clear', style: TextStyle(fontSize: 12)),
+                  child: Text(l10n.clear, style: const TextStyle(fontSize: 12)),
                 ),
             ],
           ),
@@ -297,6 +302,7 @@ class _TemplateCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GestureDetector(
       onTap: () => _openTemplateWithAnimation(context, tpl),
       child: Container(
@@ -330,7 +336,7 @@ class _TemplateCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: tpl.color.withOpacity(0.3)),
               ),
-              child: Text('Fill →', style: TextStyle(color: tpl.color, fontSize: 11, fontWeight: FontWeight.w600)),
+              child: Text(l10n.fillArrow, style: TextStyle(color: tpl.color, fontSize: 11, fontWeight: FontWeight.w600)),
             ),
           ],
         ),
@@ -385,24 +391,27 @@ Widget _getFormForTpl(_Tpl tpl) {
 class _ComingSoonForm extends StatelessWidget {
   const _ComingSoonForm();
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: DS.bg,
-    appBar: AppBar(
-      backgroundColor: DS.bgCard,
-      elevation: 0,
-      leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20), onPressed: () => Navigator.pop(context)),
-      title: const Text('Coming Soon', style: TextStyle(color: DS.textPrimary)),
-    ),
-    body: Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.construction_rounded, size: 64, color: DS.indigo),
-        const SizedBox(height: 16),
-        Text('This template is coming soon!', style: DS.title()),
-        const SizedBox(height: 8),
-        Text('We\'re working hard to add more templates.', style: DS.body()),
-      ]),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Scaffold(
+      backgroundColor: DS.bg,
+      appBar: AppBar(
+        backgroundColor: DS.bgCard,
+        elevation: 0,
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20), onPressed: () => Navigator.pop(context)),
+        title: Text(l10n.comingSoon, style: const TextStyle(color: DS.textPrimary)),
+      ),
+      body: Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.construction_rounded, size: 64, color: DS.indigo),
+          const SizedBox(height: 16),
+          Text(l10n.comingSoonTitle, style: DS.title()),
+          const SizedBox(height: 8),
+          Text(l10n.comingSoonMessage, style: DS.body()),
+        ]),
+      ),
+    );
+  }
 }
 
 class _FilterChip extends StatelessWidget {
@@ -497,57 +506,61 @@ class _InvoiceFormState extends State<InvoiceForm> {
   }
 
   @override
-  Widget build(BuildContext context) => _Scaffold(
-    title: 'Invoice',
-    icon: Icons.receipt_long_rounded,
-    color: DS.indigo,
-    onGenerate: _building ? null : _generate,
-    building: _building,
-    child: Form(
-      key: _formKey,
-      child: SingleChildScrollView(
-        child: Column(children: [
-          Row(children: [const Text('Currency: ', style: TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
-          Container(margin: const EdgeInsets.only(bottom: 16), padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: DS.bgCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: DS.separator)), child: Row(children: [
-            if (_logoBytes != null) Container(width: 60, height: 40, child: Image.memory(_logoBytes!, fit: BoxFit.contain))
-            else Container(width: 60, height: 40, decoration: BoxDecoration(color: DS.bgCard2, borderRadius: BorderRadius.circular(6)), child: const Icon(Icons.image_rounded, color: DS.textSecondary)),
-            const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Company Logo', style: DS.body(size: 13).copyWith(fontWeight: FontWeight.w600)), Text('Appears top-right on invoice', style: DS.caption().copyWith(fontSize: 11))])),
-            TextButton(onPressed: _pickLogo, child: Text(_logoBytes != null ? 'Change' : 'Upload', style: const TextStyle(color: DS.indigo, fontSize: 12, fontWeight: FontWeight.w600))),
-          ])),
-          _ResponsiveRow(children: [
-            Expanded(child: _RequiredTextField(label: 'From', controller: _from)),
-            Expanded(child: _RequiredTextField(label: 'To', controller: _to)),
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return _Scaffold(
+      title: l10n.invoice,
+      icon: Icons.receipt_long_rounded,
+      color: DS.indigo,
+      onGenerate: _building ? null : _generate,
+      building: _building,
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(children: [
+            Row(children: [Text('${l10n.currency}: ', style: const TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
+            Container(margin: const EdgeInsets.only(bottom: 16), padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: DS.bgCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: DS.separator)), child: Row(children: [
+              if (_logoBytes != null) Container(width: 60, height: 40, child: Image.memory(_logoBytes!, fit: BoxFit.contain))
+              else Container(width: 60, height: 40, decoration: BoxDecoration(color: DS.bgCard2, borderRadius: BorderRadius.circular(6)), child: const Icon(Icons.image_rounded, color: DS.textSecondary)),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(l10n.companyLogo, style: DS.body(size: 13).copyWith(fontWeight: FontWeight.w600)), Text(l10n.logoHint, style: DS.caption().copyWith(fontSize: 11))])),
+              TextButton(onPressed: _pickLogo, child: Text(_logoBytes != null ? l10n.change : l10n.upload, style: const TextStyle(color: DS.indigo, fontSize: 12, fontWeight: FontWeight.w600))),
+            ])),
+            _ResponsiveRow(children: [
+              Expanded(child: _RequiredTextField(label: l10n.from, controller: _from)),
+              Expanded(child: _RequiredTextField(label: l10n.to, controller: _to)),
+            ]),
+            _ResponsiveRow(children: [
+              Expanded(child: _RequiredTextField(label: l10n.fromAddress, controller: _fromAddr)),
+              Expanded(child: _RequiredTextField(label: l10n.clientAddress, controller: _toAddr)),
+            ]),
+            _ResponsiveRow(children: [
+              Expanded(child: _RequiredTextField(label: l10n.invoiceNumber, controller: _invoiceNum)),
+              Expanded(child: _DatePickerField(label: l10n.issueDate, controller: _date)),
+            ]),
+            _ResponsiveRow(children: [
+              Expanded(child: _DatePickerField(label: l10n.dueDate, controller: _due)),
+              const Expanded(child: SizedBox()),
+            ]),
+            SectionHeader(l10n.lineItems),
+            ..._items.asMap().entries.map((e) => _ItemRow(index: e.key+1, ctrls: e.value, onDelete: _items.length>1 ? () => setState(() => _items.removeAt(e.key)) : null, onChanged: () => setState(() {}))),
+            Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _addItem, icon: const Icon(Icons.add_rounded, size: 16), label: Text(l10n.addLineItem), style: TextButton.styleFrom(foregroundColor: DS.indigo))),
+            const Divider(color: DS.separator),
+            _summRow(l10n.subtotal, '$_currencySymbol${_subtotal.toStringAsFixed(2)}'),
+            _summRow(l10n.tax, '$_currencySymbol${_tax.toStringAsFixed(2)}'),
+            _summRow(l10n.total, '$_currencySymbol${_total.toStringAsFixed(2)}', big: true),
+            SectionHeader(l10n.qrOptional),
+            _RequiredTextField(label: l10n.notesTerms, controller: _notes, maxLines: 3),
           ]),
-          _ResponsiveRow(children: [
-            Expanded(child: _RequiredTextField(label: 'From Address', controller: _fromAddr)),
-            Expanded(child: _RequiredTextField(label: 'Client Address', controller: _toAddr)),
-          ]),
-          _ResponsiveRow(children: [
-            Expanded(child: _RequiredTextField(label: 'Invoice #', controller: _invoiceNum)),
-            Expanded(child: _DatePickerField(label: 'Issue Date', controller: _date)),
-          ]),
-          _ResponsiveRow(children: [
-            Expanded(child: _DatePickerField(label: 'Due Date', controller: _due)),
-            const Expanded(child: SizedBox()),
-          ]),
-          const SectionHeader('LINE ITEMS'),
-          ..._items.asMap().entries.map((e) => _ItemRow(index: e.key+1, ctrls: e.value, onDelete: _items.length>1 ? () => setState(() => _items.removeAt(e.key)) : null, onChanged: () => setState(() {}))),
-          Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _addItem, icon: const Icon(Icons.add_rounded, size: 16), label: const Text('Add Line Item'), style: TextButton.styleFrom(foregroundColor: DS.indigo))),
-          const Divider(color: DS.separator),
-          _summRow('Subtotal', '$_currencySymbol${_subtotal.toStringAsFixed(2)}'),
-          _summRow('Tax (10%)', '$_currencySymbol${_tax.toStringAsFixed(2)}'),
-          _summRow('TOTAL', '$_currencySymbol${_total.toStringAsFixed(2)}', big: true),
-          const SectionHeader('QR CODE (Optional)'),
-          _RequiredTextField(label: 'Notes / Terms', controller: _notes, maxLines: 3),
-        ]),
+        ),
       ),
-    ),
-  );
+    );
+  }
 
-  Widget _summRow(String l, String v, {bool big=false}) => Padding(padding: const EdgeInsets.symmetric(vertical: 3), child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [Text('$l  ', style: big ? DS.title() : DS.body()), Text(v, style: big ? DS.title(size: 20).copyWith(color: DS.indigo) : DS.body(color: DS.textSecondary))]));
+  Widget _summRow(String l, String v, {bool big=false}) => Padding(padding: const EdgeInsets.symmetric(vertical: 3), child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [Text('$l  ', style: big?DS.title():DS.body()), Text(v, style: big?DS.title(size: 20).copyWith(color: DS.indigo):DS.body(color: DS.textSecondary))]));
 
   Future<void> _generate() async {
+    final l10n = AppLocalizations.of(context)!;
     if (!_formKey.currentState!.validate()) return;
     setState(() => _building = true);
     await PdfSaveService.ensureFontsLoaded();
@@ -557,7 +570,7 @@ class _InvoiceFormState extends State<InvoiceForm> {
       doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(40), build: (_) => [
         pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
           pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-            pw.Text('INVOICE', style: _ts(fontSize: 28, bold: true, color: PdfColors.indigo900)),
+            pw.Text(l10n.invoice.toUpperCase(), style: _ts(fontSize: 28, bold: true, color: PdfColors.indigo900)),
             pw.SizedBox(height: 4),
             pw.Text(_from.text, style: _ts(fontSize: 13, color: PdfColors.grey700)),
             pw.Text(_fromAddr.text, style: _ts(fontSize: 10, color: PdfColors.grey500)),
@@ -566,15 +579,15 @@ class _InvoiceFormState extends State<InvoiceForm> {
             if (logoImg != null) pw.Image(logoImg, width: 80, height: 40, fit: pw.BoxFit.contain),
             pw.SizedBox(height: 8),
             pw.Text(_invoiceNum.text, style: _ts(fontSize: 14, bold: true)),
-            pw.Text('Date: ${_date.text}', style: _ts(fontSize: 10, color: PdfColors.grey600)),
-            pw.Text('Due: ${_due.text}', style: _ts(fontSize: 10, color: PdfColors.red)),
+            pw.Text('${l10n.date}: ${_date.text}', style: _ts(fontSize: 10, color: PdfColors.grey600)),
+            pw.Text('${l10n.due}: ${_due.text}', style: _ts(fontSize: 10, color: PdfColors.red)),
           ]),
         ]),
         pw.Divider(color: PdfColors.indigo900, thickness: 2),
         pw.SizedBox(height: 10),
-        pw.Row(children: [pw.Expanded(child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [pw.Text('BILL TO', style: _ts(fontSize: 9, bold: true, color: PdfColors.grey500)), pw.Text(_to.text, style: _ts(fontSize: 13, bold: true)), pw.Text(_toAddr.text, style: _ts(fontSize: 10, color: PdfColors.grey600))]))]),
+        pw.Row(children: [pw.Expanded(child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [pw.Text(l10n.billTo.toUpperCase(), style: _ts(fontSize: 9, bold: true, color: PdfColors.grey500)), pw.Text(_to.text, style: _ts(fontSize: 13, bold: true)), pw.Text(_toAddr.text, style: _ts(fontSize: 10, color: PdfColors.grey600))]))]),
         pw.SizedBox(height: 20),
-        _tableHeader(['Description', 'Qty', 'Unit Price', 'Total']),
+        _tableHeader([l10n.description, l10n.qty, l10n.unitPrice, l10n.total]),
         ..._items.asMap().entries.map((e) {
           final qty = double.tryParse(e.value['qty']!.text) ?? 0;
           final rate = double.tryParse(e.value['rate']!.text) ?? 0;
@@ -582,25 +595,25 @@ class _InvoiceFormState extends State<InvoiceForm> {
         }),
         pw.SizedBox(height: 8),
         pw.Row(mainAxisAlignment: pw.MainAxisAlignment.end, children: [pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-          _totalRow('Subtotal', '$_currencySymbol${_subtotal.toStringAsFixed(2)}'),
-          _totalRow('Tax (10%)', '$_currencySymbol${_tax.toStringAsFixed(2)}'),
+          _totalRow(l10n.subtotal, '$_currencySymbol${_subtotal.toStringAsFixed(2)}'),
+          _totalRow(l10n.tax, '$_currencySymbol${_tax.toStringAsFixed(2)}'),
           pw.Divider(color: PdfColors.indigo900),
-          _totalRow('TOTAL', '$_currencySymbol${_total.toStringAsFixed(2)}', bold: true),
+          _totalRow(l10n.total, '$_currencySymbol${_total.toStringAsFixed(2)}', bold: true),
         ])]),
         if (_qrData.text.trim().isNotEmpty) ...[
           pw.SizedBox(height: 16),
           pw.Row(mainAxisAlignment: pw.MainAxisAlignment.end, children: [pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
             pw.BarcodeWidget(barcode: pw.Barcode.qrCode(), data: _qrData.text.trim(), width: 70, height: 70),
-            pw.Text('Scan to pay', style: _ts(fontSize: 6, color: PdfColors.grey500)),
+            pw.Text(l10n.scanToPay, style: _ts(fontSize: 6, color: PdfColors.grey500)),
           ])]),
         ],
         if (_notes.text.trim().isNotEmpty) ...[
           pw.SizedBox(height: 16),
-          pw.Text('Notes:', style: _ts(fontSize: 10, bold: true)),
+          pw.Text(l10n.notes, style: _ts(fontSize: 10, bold: true)),
           pw.Text(_notes.text, style: _ts(fontSize: 9, color: PdfColors.grey600)),
         ],
       ]));
-      final (path, bytes) = await _savePdf(doc, 'invoice_${_invoiceNum.text}');
+      final (path, bytes) = await _savePdf(doc, '${l10n.invoice}_${_invoiceNum.text}');
       if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
     } finally { if (mounted) setState(() => _building = false); }
   }
@@ -630,40 +643,44 @@ class _NdaState extends State<NdaForm> {
   static String _today() => '${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}';
 
   @override
-  Widget build(BuildContext context) => _Scaffold(
-    title: 'NDA',
-    icon: Icons.gavel_rounded,
-    color: DS.orange,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Form(
-      key: _formKey,
-      child: Column(children: [
-        _RequiredTextField(label: 'Disclosing Party', controller: _p1),
-        _RequiredTextField(label: 'Receiving Party', controller: _p2),
-        _ResponsiveRow(children: [
-          Expanded(child: _DatePickerField(label: 'Effective Date', controller: _date)),
-          Expanded(child: _RequiredTextField(label: 'Duration', controller: _period)),
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return _Scaffold(
+      title: l10n.nda,
+      icon: Icons.gavel_rounded,
+      color: DS.orange,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Form(
+        key: _formKey,
+        child: Column(children: [
+          _RequiredTextField(label: l10n.disclosingParty, controller: _p1),
+          _RequiredTextField(label: l10n.receivingParty, controller: _p2),
+          _ResponsiveRow(children: [
+            Expanded(child: _DatePickerField(label: l10n.effectiveDate, controller: _date)),
+            Expanded(child: _RequiredTextField(label: l10n.duration, controller: _period)),
+          ]),
+          _RequiredTextField(label: l10n.governingState, controller: _state),
         ]),
-        _RequiredTextField(label: 'Governing State', controller: _state),
-      ]),
-    ),
-  );
+      ),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     if (!_formKey.currentState!.validate()) return;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
       doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(52), build: (_) => [
-        pw.Text('NON-DISCLOSURE AGREEMENT', style: _ts(fontSize: 18, bold: true)),
+        pw.Text(l10n.ndaTitle, style: _ts(fontSize: 18, bold: true)),
         pw.SizedBox(height: 16),
-        pw.Text('This Agreement is entered into on ${_date.text} between ${_p1.text} ("Disclosing Party") and ${_p2.text} ("Receiving Party").', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.ndaIntro1} ${_date.text} ${l10n.ndaIntro2} ${_p1.text} ${l10n.ndaIntro3} ${_p2.text} ${l10n.ndaIntro4}', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 12),
-        ...['1. Confidential Information. The Receiving Party shall keep all disclosed information confidential.','2. Non-Use. Information shall only be used to evaluate a potential business relationship.','3. Duration. Obligations continue for ${_period.text} from the Effective Date.','4. Governing Law. This Agreement is governed by laws of ${_state.text}.'].map((t) => pw.Padding(padding: const pw.EdgeInsets.only(bottom: 8), child: pw.Text(t, style: _ts(fontSize: 11)))),
+        ...['1. ${l10n.clause1}', '2. ${l10n.clause2}', '3. ${l10n.clause3} ${_period.text}', '4. ${l10n.clause4} ${_state.text}'].map((t) => pw.Padding(padding: const pw.EdgeInsets.only(bottom: 8), child: pw.Text(t, style: _ts(fontSize: 11)))),
         pw.SizedBox(height: 40),
-        pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_p1.text}  Signature', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_p2.text}  Signature', style: _ts(fontSize: 9))]))]),
+        pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_p1.text}  ${l10n.signature}', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_p2.text}  ${l10n.signature}', style: _ts(fontSize: 9))]))]),
       ]));
       final (path, bytes) = await _savePdf(doc, 'nda_${DateTime.now().millisecondsSinceEpoch}');
       if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
@@ -691,22 +708,26 @@ class _OfferState extends State<OfferLetterForm> {
   bool _b = false;
 
   @override
-  Widget build(BuildContext context) => _Scaffold(
-    title: 'Offer Letter',
-    icon: Icons.mail_rounded,
-    color: DS.purple,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      _field('Company', _co),
-      _field('Candidate Name', _cand),
-      _field('Job Title', _role),
-      _row([Expanded(child: _field('Start Date', _start)), Expanded(child: _field('Offer Deadline', _dl))]),
-      _field('Compensation', _sal),
-    ]),
-  );
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return _Scaffold(
+      title: l10n.offerLetter,
+      icon: Icons.mail_rounded,
+      color: DS.purple,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        _field(l10n.company, _co),
+        _field(l10n.candidateName, _cand),
+        _field(l10n.jobTitle, _role),
+        _row([Expanded(child: _field(l10n.startDate, _start)), Expanded(child: _field(l10n.offerDeadline, _dl))]),
+        _field(l10n.compensation, _sal),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
@@ -714,15 +735,15 @@ class _OfferState extends State<OfferLetterForm> {
       doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(52), build: (_) => [
         pw.Text(_co.text, style: _ts(fontSize: 20, bold: true, color: PdfColors.deepPurple)),
         pw.SizedBox(height: 16),
-        pw.Text('Dear ${_cand.text},', style: _ts(fontSize: 13)),
+        pw.Text('${l10n.dear} ${_cand.text},', style: _ts(fontSize: 13)),
         pw.SizedBox(height: 10),
-        pw.Text('We are pleased to offer you the position of ${_role.text} at ${_co.text}.', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.offerLetterBody1} ${_role.text} ${l10n.offerLetterBody2} ${_co.text}.', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 14),
-        ...{'Position': _role.text, 'Start Date': _start.text, 'Compensation': _sal.text}.entries.map((e) => pw.Padding(padding: const pw.EdgeInsets.only(bottom: 6), child: pw.Row(children: [pw.SizedBox(width: 130, child: pw.Text(e.key, style: _ts(fontSize: 10, bold: true))), pw.Text(e.value, style: _ts(fontSize: 10))]))),
+        ...{l10n.position: _role.text, l10n.startDate: _start.text, l10n.compensation: _sal.text}.entries.map((e) => pw.Padding(padding: const pw.EdgeInsets.only(bottom: 6), child: pw.Row(children: [pw.SizedBox(width: 130, child: pw.Text(e.key, style: _ts(fontSize: 10, bold: true))), pw.Text(e.value, style: _ts(fontSize: 10))]))),
         pw.SizedBox(height: 12),
-        pw.Text('Please accept this offer by ${_dl.text}.', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.offerLetterDeadline} ${_dl.text}.', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 40),
-        pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('Authorized Signature', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_cand.text} — Acceptance', style: _ts(fontSize: 9))]))]),
+        pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text(l10n.authorizedSignature, style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_cand.text} — ${l10n.acceptance}', style: _ts(fontSize: 9))]))]),
       ]));
       final (path, bytes) = await _savePdf(doc, 'offer_${_cand.text.replaceAll(' ', '_')}');
       if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
@@ -760,45 +781,49 @@ class _POState extends State<PurchaseOrderForm> {
   double get _total => _items.fold(0.0, (s, i) => s + (double.tryParse(i['qty']!.text) ?? 0) * (double.tryParse(i['price']!.text) ?? 0));
 
   @override
-  Widget build(BuildContext context) => _Scaffold(
-    title: 'Purchase Order',
-    icon: Icons.shopping_cart_rounded,
-    color: DS.indigo,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      Row(children: [const Text('Currency: ', style: TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
-      _row([Expanded(child: _field('Buyer', _buyer)), Expanded(child: _field('Vendor', _vendor))]),
-      _row([Expanded(child: _field('PO Number', _poNum)), Expanded(child: _field('Date', _date))]),
-      _row([Expanded(child: _field('Delivery', _del)), Expanded(child: _field('Payment Terms', _terms))]),
-      const SectionHeader('ITEMS'),
-      ..._items.asMap().entries.map((e) => _ItemRow(index: e.key+1, ctrls: Map.from({'desc': e.value['desc']!, 'qty': e.value['qty']!, 'rate': e.value['price']!}), onDelete: _items.length>1 ? () => setState(() => _items.removeAt(e.key)) : null, onChanged: () => setState(() {}))),
-      Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => setState(() => _items.add({'desc': TextEditingController(text: 'Item'), 'qty': TextEditingController(text: '1'), 'price': TextEditingController(text: '0.00')})), icon: const Icon(Icons.add_rounded, size: 16), label: const Text('Add Item'), style: TextButton.styleFrom(foregroundColor: DS.indigo))),
-      _row([const Expanded(child: SizedBox()), Padding(padding: const EdgeInsets.only(top: 8), child: Text('Total: $_currencySymbol${_total.toStringAsFixed(2)}', style: DS.title(size: 18).copyWith(color: DS.indigo)))]),
-    ]),
-  );
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return _Scaffold(
+      title: l10n.purchaseOrder,
+      icon: Icons.shopping_cart_rounded,
+      color: DS.indigo,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        Row(children: [Text('${l10n.currency}: ', style: const TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
+        _row([Expanded(child: _field(l10n.buyer, _buyer)), Expanded(child: _field(l10n.vendor, _vendor))]),
+        _row([Expanded(child: _field(l10n.poNumber, _poNum)), Expanded(child: _field(l10n.date, _date))]),
+        _row([Expanded(child: _field(l10n.delivery, _del)), Expanded(child: _field(l10n.paymentTerms, _terms))]),
+        SectionHeader(l10n.items),
+        ..._items.asMap().entries.map((e) => _ItemRow(index: e.key+1, ctrls: Map.from({'desc': e.value['desc']!, 'qty': e.value['qty']!, 'rate': e.value['price']!}), onDelete: _items.length>1 ? () => setState(() => _items.removeAt(e.key)) : null, onChanged: () => setState(() {}))),
+        Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => setState(() => _items.add({'desc': TextEditingController(text: l10n.item), 'qty': TextEditingController(text: '1'), 'price': TextEditingController(text: '0.00')})), icon: const Icon(Icons.add_rounded, size: 16), label: Text(l10n.addItem), style: TextButton.styleFrom(foregroundColor: DS.indigo))),
+        _row([const Expanded(child: SizedBox()), Padding(padding: const EdgeInsets.only(top: 8), child: Text('${l10n.total}: $_currencySymbol${_total.toStringAsFixed(2)}', style: DS.title(size: 18).copyWith(color: DS.indigo)))]),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
       doc.addPage(pw.Page(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(40), build: (_) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-        pw.Text('PURCHASE ORDER', style: _ts(fontSize: 24, bold: true, color: PdfColors.indigo900)),
+        pw.Text(l10n.purchaseOrderTitle, style: _ts(fontSize: 24, bold: true, color: PdfColors.indigo900)),
         pw.SizedBox(height: 8),
-        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('Buyer: ${_buyer.text}', style: _ts(fontSize: 11)), pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [pw.Text('PO: ${_poNum.text}', style: _ts(fontSize: 12, bold: true)), pw.Text('Date: ${_date.text}', style: _ts(fontSize: 10, color: PdfColors.grey600))])]),
-        pw.Text('Vendor: ${_vendor.text}', style: _ts(fontSize: 11)),
+        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('${l10n.buyer}: ${_buyer.text}', style: _ts(fontSize: 11)), pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [pw.Text('${l10n.poNumber}: ${_poNum.text}', style: _ts(fontSize: 12, bold: true)), pw.Text('${l10n.date}: ${_date.text}', style: _ts(fontSize: 10, color: PdfColors.grey600))])]),
+        pw.Text('${l10n.vendor}: ${_vendor.text}', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 16),
-        pw.Container(color: PdfColors.indigo900, padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6), child: pw.Row(children: [pw.Expanded(flex: 4, child: pw.Text('Item', style: _ts(fontSize: 10, bold: true, color: PdfColors.white))), pw.Expanded(child: pw.Text('Qty', style: _ts(fontSize: 10, bold: true, color: PdfColors.white), textAlign: pw.TextAlign.right)), pw.Expanded(child: pw.Text('Price', style: _ts(fontSize: 10, bold: true, color: PdfColors.white), textAlign: pw.TextAlign.right)), pw.Expanded(child: pw.Text('Total', style: _ts(fontSize: 10, bold: true, color: PdfColors.white), textAlign: pw.TextAlign.right))])),
+        pw.Container(color: PdfColors.indigo900, padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6), child: pw.Row(children: [pw.Expanded(flex: 4, child: pw.Text(l10n.item, style: _ts(fontSize: 10, bold: true, color: PdfColors.white))), pw.Expanded(child: pw.Text(l10n.qty, style: _ts(fontSize: 10, bold: true, color: PdfColors.white), textAlign: pw.TextAlign.right)), pw.Expanded(child: pw.Text(l10n.price, style: _ts(fontSize: 10, bold: true, color: PdfColors.white), textAlign: pw.TextAlign.right)), pw.Expanded(child: pw.Text(l10n.total, style: _ts(fontSize: 10, bold: true, color: PdfColors.white), textAlign: pw.TextAlign.right))])),
         ..._items.asMap().entries.map((e) {
           final qty = double.tryParse(e.value['qty']!.text) ?? 0;
           final price = double.tryParse(e.value['price']!.text) ?? 0;
           return pw.Container(color: e.key.isEven ? PdfColors.grey100 : PdfColors.white, padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 5), child: pw.Row(children: [pw.Expanded(flex: 4, child: pw.Text(e.value['desc']!.text, style: _ts(fontSize: 9))), pw.Expanded(child: pw.Text(qty.toInt().toString(), style: _ts(fontSize: 9), textAlign: pw.TextAlign.right)), pw.Expanded(child: pw.Text('$_currencySymbol${price.toStringAsFixed(2)}', style: _ts(fontSize: 9), textAlign: pw.TextAlign.right)), pw.Expanded(child: pw.Text('$_currencySymbol${(qty*price).toStringAsFixed(2)}', style: _ts(fontSize: 9), textAlign: pw.TextAlign.right))]));
         }),
         pw.SizedBox(height: 8),
-        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.end, children: [pw.Text('TOTAL  $_currencySymbol${_total.toStringAsFixed(2)}', style: _ts(fontSize: 14, bold: true, color: PdfColors.indigo900))]),
+        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.end, children: [pw.Text('${l10n.total.toUpperCase()}  $_currencySymbol${_total.toStringAsFixed(2)}', style: _ts(fontSize: 14, bold: true, color: PdfColors.indigo900))]),
         pw.SizedBox(height: 14),
-        pw.Text('Delivery: ${_del.text}  ·  Terms: ${_terms.text}', style: _ts(fontSize: 9, color: PdfColors.grey600)),
+        pw.Text('${l10n.delivery}: ${_del.text}  ·  ${l10n.terms}: ${_terms.text}', style: _ts(fontSize: 9, color: PdfColors.grey600)),
       ])));
       final (path, bytes) = await _savePdf(doc, 'po_${_poNum.text}');
       if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
@@ -828,32 +853,36 @@ class _SAState extends State<ServiceAgreementForm> {
   bool _b = false;
 
   @override
-  Widget build(BuildContext c) => _Scaffold(
-    title: 'Service Agreement',
-    icon: Icons.handshake_rounded,
-    color: DS.green,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      Row(children: [const Text('Currency: ', style: TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
-      _row([Expanded(child: _field('Service Provider', _sp)), Expanded(child: _field('Client', _cl))]),
-      _field('Services Description', _svc, maxLines: 3),
-      _field('Fee (monthly)', _fee),
-      _row([Expanded(child: _field('Start Date', _start)), Expanded(child: _field('End Date', _end))]),
-    ]),
-  );
+  Widget build(BuildContext c) {
+    final l10n = AppLocalizations.of(c)!;
+    return _Scaffold(
+      title: l10n.serviceAgreement,
+      icon: Icons.handshake_rounded,
+      color: DS.green,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        Row(children: [Text('${l10n.currency}: ', style: const TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
+        _row([Expanded(child: _field(l10n.serviceProvider, _sp)), Expanded(child: _field(l10n.client, _cl))]),
+        _field(l10n.servicesDescription, _svc, maxLines: 3),
+        _field(l10n.feeMonthly, _fee),
+        _row([Expanded(child: _field(l10n.startDate, _start)), Expanded(child: _field(l10n.endDate, _end))]),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
       doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(52), build: (_) => [
-        pw.Text('SERVICE AGREEMENT', style: _ts(fontSize: 20, bold: true)),
+        pw.Text(l10n.serviceAgreementTitle, style: _ts(fontSize: 20, bold: true)),
         pw.SizedBox(height: 16),
-        pw.Text('This Agreement is between ${_sp.text} ("Provider") and ${_cl.text} ("Client").', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.serviceAgreementIntro1} ${_sp.text} ${l10n.serviceAgreementIntro2} ${_cl.text} ${l10n.serviceAgreementIntro3}', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 10),
-        ...{'Services': _svc.text, 'Fee': '$_currencySymbol${_fee.text}/month', 'Term': '${_start.text} to ${_end.text}'}.entries.map((e) => pw.Padding(padding: const pw.EdgeInsets.only(bottom: 8), child: pw.Row(children: [pw.SizedBox(width: 120, child: pw.Text(e.key, style: _ts(fontSize: 11, bold: true))), pw.Expanded(child: pw.Text(e.value, style: _ts(fontSize: 11)))]))),
+        ...{l10n.services: _svc.text, l10n.fee: '$_currencySymbol${_fee.text}/${l10n.perMonth}', l10n.term: '${_start.text} ${l10n.to} ${_end.text}'}.entries.map((e) => pw.Padding(padding: const pw.EdgeInsets.only(bottom: 8), child: pw.Row(children: [pw.SizedBox(width: 120, child: pw.Text(e.key, style: _ts(fontSize: 11, bold: true))), pw.Expanded(child: pw.Text(e.value, style: _ts(fontSize: 11)))]))),
         pw.SizedBox(height: 40),
         pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_sp.text}', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_cl.text}', style: _ts(fontSize: 9))]))]),
       ]));
@@ -892,24 +921,28 @@ class _RcptState extends State<ReceiptForm> {
   double get _total => _items.fold(0.0, (s, i) => s + (double.tryParse(i['qty']!.text) ?? 0) * (double.tryParse(i['price']!.text) ?? 0));
 
   @override
-  Widget build(BuildContext c) => _Scaffold(
-    title: 'Receipt',
-    icon: Icons.receipt_rounded,
-    color: DS.orange,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      Row(children: [const Text('Currency: ', style: TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
-      _row([Expanded(child: _field('From', _from)), Expanded(child: _field('To', _to))]),
-      _row([Expanded(child: _field('Receipt #', _num)), Expanded(child: _field('Date', _date))]),
-      const SectionHeader('ITEMS'),
-      ..._items.asMap().entries.map((e) => _ItemRow(index: e.key+1, ctrls: Map.from({'desc': e.value['desc']!, 'qty': e.value['qty']!, 'rate': e.value['price']!}), onDelete: _items.length>1 ? () => setState(() => _items.removeAt(e.key)) : null, onChanged: () => setState(() {}))),
-      Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => setState(() => _items.add({'desc': TextEditingController(text: 'Item'), 'qty': TextEditingController(text: '1'), 'price': TextEditingController(text: '0.00')})), icon: const Icon(Icons.add_rounded, size: 16), label: const Text('Add Item'), style: TextButton.styleFrom(foregroundColor: DS.indigo))),
-      Padding(padding: const EdgeInsets.only(top: 8), child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [Text('TOTAL: $_currencySymbol${_total.toStringAsFixed(2)}', style: DS.title(size: 18).copyWith(color: DS.orange))])),
-    ]),
-  );
+  Widget build(BuildContext c) {
+    final l10n = AppLocalizations.of(c)!;
+    return _Scaffold(
+      title: l10n.receipt,
+      icon: Icons.receipt_rounded,
+      color: DS.orange,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        Row(children: [Text('${l10n.currency}: ', style: const TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
+        _row([Expanded(child: _field(l10n.from, _from)), Expanded(child: _field(l10n.to, _to))]),
+        _row([Expanded(child: _field(l10n.receiptNumber, _num)), Expanded(child: _field(l10n.date, _date))]),
+        SectionHeader(l10n.items),
+        ..._items.asMap().entries.map((e) => _ItemRow(index: e.key+1, ctrls: Map.from({'desc': e.value['desc']!, 'qty': e.value['qty']!, 'rate': e.value['price']!}), onDelete: _items.length>1 ? () => setState(() => _items.removeAt(e.key)) : null, onChanged: () => setState(() {}))),
+        Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => setState(() => _items.add({'desc': TextEditingController(text: l10n.item), 'qty': TextEditingController(text: '1'), 'price': TextEditingController(text: '0.00')})), icon: const Icon(Icons.add_rounded, size: 16), label: Text(l10n.addItem), style: TextButton.styleFrom(foregroundColor: DS.indigo))),
+        Padding(padding: const EdgeInsets.only(top: 8), child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [Text('${l10n.total}: $_currencySymbol${_total.toStringAsFixed(2)}', style: DS.title(size: 18).copyWith(color: DS.orange))])),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
@@ -917,19 +950,19 @@ class _RcptState extends State<ReceiptForm> {
       doc.addPage(pw.Page(pageFormat: PdfPageFormat(226.77, double.infinity), margin: const pw.EdgeInsets.all(16), build: (_) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.center, children: [
         pw.Text(_from.text, style: _ts(fontSize: 14, bold: true)),
         pw.SizedBox(height: 4),
-        pw.Text('RECEIPT', style: _ts(fontSize: 18, bold: true, color: PdfColors.orange)),
+        pw.Text(l10n.receiptTitle, style: _ts(fontSize: 18, bold: true, color: PdfColors.orange)),
         pw.SizedBox(height: 4),
         pw.Text('${_num.text}  ·  ${_date.text}', style: _ts(fontSize: 8, color: PdfColors.grey600)),
         pw.Divider(),
-        pw.Text('To: ${_to.text}', style: _ts(fontSize: 9)),
+        pw.Text('${l10n.to}: ${_to.text}', style: _ts(fontSize: 9)),
         pw.Divider(),
         ..._items.map((i) => pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('${i['desc']!.text} ×${i['qty']!.text}', style: _ts(fontSize: 9)), pw.Text('$_currencySymbol${((double.tryParse(i['qty']!.text)??0)*(double.tryParse(i['price']!.text)??0)).toStringAsFixed(2)}', style: _ts(fontSize: 9))])),
         pw.Divider(),
-        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('TOTAL', style: _ts(fontSize: 11, bold: true)), pw.Text('$_currencySymbol${_total.toStringAsFixed(2)}', style: _ts(fontSize: 11, bold: true))]),
+        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text(l10n.total, style: _ts(fontSize: 11, bold: true)), pw.Text('$_currencySymbol${_total.toStringAsFixed(2)}', style: _ts(fontSize: 11, bold: true))]),
         pw.SizedBox(height: 8),
-        pw.Text('Thank you!', style: _ts(fontSize: 8, color: PdfColors.grey500)),
+        pw.Text(l10n.thankYou, style: _ts(fontSize: 8, color: PdfColors.grey500)),
       ])));
-      final (path, bytes) = await _savePdf(doc, 'receipt_${_num.text}');
+      final (path, bytes) = await _savePdf(doc, '${l10n.receipt}_${_num.text}');
       if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
     } finally { if (mounted) setState(() => _b = false); }
   }
@@ -971,46 +1004,50 @@ class _QuotationFormState extends State<QuotationForm> {
   double get _total => _subtotal + _tax;
 
   @override
-  Widget build(BuildContext context) => _Scaffold(
-    title: 'Quotation',
-    icon: Icons.request_quote_rounded,
-    color: DS.indigo,
-    onGenerate: _building ? null : _generate,
-    building: _building,
-    child: Column(children: [
-      Row(children: [const Text('Currency: ', style: TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
-      _row([Expanded(child: _field('From', _from)), Expanded(child: _field('To', _to))]),
-      _row([Expanded(child: _field('Quote #', _quoteNum)), Expanded(child: _field('Date', _date))]),
-      _field('Valid Until', _valid),
-      const SectionHeader('LINE ITEMS'),
-      ..._items.asMap().entries.map((e) => _ItemRow(index: e.key+1, ctrls: e.value, onDelete: _items.length>1 ? () => setState(() => _items.removeAt(e.key)) : null, onChanged: () => setState(() {}))),
-      Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _addItem, icon: const Icon(Icons.add_rounded, size: 16), label: const Text('Add Line Item'), style: TextButton.styleFrom(foregroundColor: DS.indigo))),
-      const Divider(),
-      _summRow('Subtotal', '$_currencySymbol${_subtotal.toStringAsFixed(2)}'),
-      _summRow('Tax (10%)', '$_currencySymbol${_tax.toStringAsFixed(2)}'),
-      _summRow('TOTAL', '$_currencySymbol${_total.toStringAsFixed(2)}', big: true),
-      _field('Notes', _notes, maxLines: 2),
-    ]),
-  );
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return _Scaffold(
+      title: l10n.quotation,
+      icon: Icons.request_quote_rounded,
+      color: DS.indigo,
+      onGenerate: _building ? null : _generate,
+      building: _building,
+      child: Column(children: [
+        Row(children: [Text('${l10n.currency}: ', style: const TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
+        _row([Expanded(child: _field(l10n.from, _from)), Expanded(child: _field(l10n.to, _to))]),
+        _row([Expanded(child: _field(l10n.quotationNumber, _quoteNum)), Expanded(child: _field(l10n.date, _date))]),
+        _field(l10n.validUntil, _valid),
+        SectionHeader(l10n.lineItems),
+        ..._items.asMap().entries.map((e) => _ItemRow(index: e.key+1, ctrls: e.value, onDelete: _items.length>1 ? () => setState(() => _items.removeAt(e.key)) : null, onChanged: () => setState(() {}))),
+        Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _addItem, icon: const Icon(Icons.add_rounded, size: 16), label: Text(l10n.addLineItem), style: TextButton.styleFrom(foregroundColor: DS.indigo))),
+        const Divider(),
+        _summRow(l10n.subtotal, '$_currencySymbol${_subtotal.toStringAsFixed(2)}'),
+        _summRow(l10n.tax, '$_currencySymbol${_tax.toStringAsFixed(2)}'),
+        _summRow(l10n.total, '$_currencySymbol${_total.toStringAsFixed(2)}', big: true),
+        _field(l10n.notes, _notes, maxLines: 2),
+      ]),
+    );
+  }
 
   Widget _summRow(String l, String v, {bool big=false}) => Padding(padding: const EdgeInsets.symmetric(vertical: 3), child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [Text('$l  ', style: big?DS.title():DS.body()), Text(v, style: big?DS.title(size:20).copyWith(color:DS.indigo):DS.body(color:DS.textSecondary))]));
 
   Future<void> _generate() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _building = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
       doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(40), build: (_) => [
-        pw.Text('QUOTATION', style: _ts(fontSize: 28, bold: true, color: PdfColors.indigo900)),
+        pw.Text(l10n.quotationTitle, style: _ts(fontSize: 28, bold: true, color: PdfColors.indigo900)),
         pw.SizedBox(height: 8),
         pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-          pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [pw.Text(_from.text, style: _ts(fontSize: 13)), pw.Text('Quote #: ${_quoteNum.text}', style: _ts(fontSize: 10))]),
-          pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [pw.Text('Date: ${_date.text}', style: _ts(fontSize: 10)), pw.Text('Valid until: ${_valid.text}', style: _ts(fontSize: 10, color: PdfColors.red))]),
+          pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [pw.Text(_from.text, style: _ts(fontSize: 13)), pw.Text('${l10n.quotationNumber}: ${_quoteNum.text}', style: _ts(fontSize: 10))]),
+          pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [pw.Text('${l10n.date}: ${_date.text}', style: _ts(fontSize: 10)), pw.Text('${l10n.validUntil}: ${_valid.text}', style: _ts(fontSize: 10, color: PdfColors.red))]),
         ]),
         pw.SizedBox(height: 20),
-        pw.Text('Bill To: ${_to.text}', style: _ts(fontSize: 12, bold: true)),
+        pw.Text('${l10n.billTo}: ${_to.text}', style: _ts(fontSize: 12, bold: true)),
         pw.SizedBox(height: 10),
-        _tableHeader(['Description', 'Qty', 'Unit Price', 'Total']),
+        _tableHeader([l10n.description, l10n.qty, l10n.unitPrice, l10n.total]),
         ..._items.asMap().entries.map((e) {
           final qty = double.tryParse(e.value['qty']!.text) ?? 0;
           final rate = double.tryParse(e.value['rate']!.text) ?? 0;
@@ -1018,14 +1055,14 @@ class _QuotationFormState extends State<QuotationForm> {
         }),
         pw.SizedBox(height: 8),
         pw.Row(mainAxisAlignment: pw.MainAxisAlignment.end, children: [pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-          _totalRow('Subtotal', '$_currencySymbol${_subtotal.toStringAsFixed(2)}'),
-          _totalRow('Tax (10%)', '$_currencySymbol${_tax.toStringAsFixed(2)}'),
+          _totalRow(l10n.subtotal, '$_currencySymbol${_subtotal.toStringAsFixed(2)}'),
+          _totalRow(l10n.tax, '$_currencySymbol${_tax.toStringAsFixed(2)}'),
           pw.Divider(),
-          _totalRow('TOTAL', '$_currencySymbol${_total.toStringAsFixed(2)}', bold: true),
+          _totalRow(l10n.total, '$_currencySymbol${_total.toStringAsFixed(2)}', bold: true),
         ])]),
-        if (_notes.text.trim().isNotEmpty) ...[pw.SizedBox(height: 16), pw.Text('Notes:', style: _ts(fontSize: 10, bold: true)), pw.Text(_notes.text, style: _ts(fontSize: 9, color: PdfColors.grey600))],
+        if (_notes.text.trim().isNotEmpty) ...[pw.SizedBox(height: 16), pw.Text('${l10n.notes}:', style: _ts(fontSize: 10, bold: true)), pw.Text(_notes.text, style: _ts(fontSize: 9, color: PdfColors.grey600))],
       ]));
-      final (path, bytes) = await _savePdf(doc, 'quotation_${_quoteNum.text}');
+      final (path, bytes) = await _savePdf(doc, '${l10n.quotation}_${_quoteNum.text}');
       if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
     } finally { if (mounted) setState(() => _building = false); }
   }
@@ -1057,35 +1094,39 @@ class _BillOfSaleState extends State<BillOfSaleForm> {
   static String _today() => '${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}';
 
   @override
-  Widget build(BuildContext c) => _Scaffold(
-    title: 'Bill of Sale',
-    icon: Icons.description_rounded,
-    color: DS.orange,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      Row(children: [const Text('Currency: ', style: TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
-      _row([Expanded(child: _field('Seller', _seller)), Expanded(child: _field('Buyer', _buyer))]),
-      _field('Item/Asset Description', _item, maxLines: 2),
-      _row([Expanded(child: _field('Sale Price', _price)), Expanded(child: _field('Date of Sale', _date))]),
-    ]),
-  );
+  Widget build(BuildContext c) {
+    final l10n = AppLocalizations.of(c)!;
+    return _Scaffold(
+      title: l10n.billOfSale,
+      icon: Icons.description_rounded,
+      color: DS.orange,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        Row(children: [Text('${l10n.currency}: ', style: const TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
+        _row([Expanded(child: _field(l10n.seller, _seller)), Expanded(child: _field(l10n.buyer, _buyer))]),
+        _field(l10n.itemDescription, _item, maxLines: 2),
+        _row([Expanded(child: _field(l10n.salePrice, _price)), Expanded(child: _field(l10n.dateOfSale, _date))]),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
       doc.addPage(pw.Page(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(50), build: (_) => pw.Column(children: [
-        pw.Text('BILL OF SALE', style: _ts(fontSize: 24, bold: true)),
+        pw.Text(l10n.billOfSaleTitle, style: _ts(fontSize: 24, bold: true)),
         pw.SizedBox(height: 20),
-        pw.Text('This Bill of Sale is made on ${_date.text} between ${_seller.text} ("Seller") and ${_buyer.text} ("Buyer").', style: _ts(fontSize: 12)),
+        pw.Text('${l10n.billOfSaleIntro1} ${_date.text} ${l10n.billOfSaleIntro2} ${_seller.text} ${l10n.billOfSaleIntro3} ${_buyer.text} ${l10n.billOfSaleIntro4}', style: _ts(fontSize: 12)),
         pw.SizedBox(height: 16),
-        pw.Text('For the sum of $_currencySymbol${_price.text}, the Seller sells and transfers to the Buyer the following property:', style: _ts(fontSize: 12)),
+        pw.Text('${l10n.billOfSaleAmount} $_currencySymbol${_price.text}, ${l10n.billOfSaleTransfer} ', style: _ts(fontSize: 12)),
         pw.SizedBox(height: 8),
         pw.Container(padding: const pw.EdgeInsets.all(12), decoration: pw.BoxDecoration(border: pw.Border.all()), child: pw.Text(_item.text, style: _ts(fontSize: 11))),
         pw.SizedBox(height: 40),
-        pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('Seller Signature', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('Buyer Signature', style: _ts(fontSize: 9))]))]),
+        pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${l10n.sellerSignature}', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${l10n.buyerSignature}', style: _ts(fontSize: 9))]))]),
       ])));
       final (path, bytes) = await _savePdf(doc, 'bill_of_sale_${DateTime.now().millisecondsSinceEpoch}');
       if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
@@ -1121,46 +1162,50 @@ class _ExpenseReportState extends State<ExpenseReportForm> {
   double get _total => _items.fold(0.0, (s, i) => s + (double.tryParse(i['amount']!.text) ?? 0));
 
   @override
-  Widget build(BuildContext c) => _Scaffold(
-    title: 'Expense Report',
-    icon: Icons.assessment_rounded,
-    color: DS.green,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      Row(children: [const Text('Currency: ', style: TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
-      _row([Expanded(child: _field('Employee', _employee)), Expanded(child: _field('Department', _dept))]),
-      _field('Date', _date),
-      const SectionHeader('EXPENSES'),
-      ..._items.asMap().entries.map((e) => Container(margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: DS.bgCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: DS.separator)), child: Column(children: [
-        Row(children: [Text('#${e.key+1}', style: DS.caption()), const Spacer(), if(_items.length>1) GestureDetector(onTap: () => setState(() => _items.removeAt(e.key)), child: const Icon(Icons.close_rounded, color: DS.red, size: 18))]),
-        const SizedBox(height: 8),
-        _field('Description', e.value['desc']!),
-        _field('Amount', e.value['amount']!),
-      ]))),
-      Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => setState(() => _items.add({'desc': TextEditingController(text: ''), 'amount': TextEditingController(text: '0.00')})), icon: const Icon(Icons.add_rounded, size: 16), label: const Text('Add Expense'), style: TextButton.styleFrom(foregroundColor: DS.indigo))),
-      _row([const Expanded(child: SizedBox()), Padding(padding: const EdgeInsets.only(top: 8), child: Text('Total: $_currencySymbol${_total.toStringAsFixed(2)}', style: DS.title(size: 18).copyWith(color: DS.green)))]),
-    ]),
-  );
+  Widget build(BuildContext c) {
+    final l10n = AppLocalizations.of(c)!;
+    return _Scaffold(
+      title: l10n.expenseReport,
+      icon: Icons.assessment_rounded,
+      color: DS.green,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        Row(children: [Text('${l10n.currency}: ', style: const TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
+        _row([Expanded(child: _field(l10n.employee, _employee)), Expanded(child: _field(l10n.department, _dept))]),
+        _field(l10n.date, _date),
+        SectionHeader(l10n.expenses),
+        ..._items.asMap().entries.map((e) => Container(margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: DS.bgCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: DS.separator)), child: Column(children: [
+          Row(children: [Text('#${e.key+1}', style: DS.caption()), const Spacer(), if(_items.length>1) GestureDetector(onTap: () => setState(() => _items.removeAt(e.key)), child: const Icon(Icons.close_rounded, color: DS.red, size: 18))]),
+          const SizedBox(height: 8),
+          _field(l10n.description, e.value['desc']!),
+          _field(l10n.amount, e.value['amount']!),
+        ]))),
+        Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => setState(() => _items.add({'desc': TextEditingController(text: ''), 'amount': TextEditingController(text: '0.00')})), icon: const Icon(Icons.add_rounded, size: 16), label: Text(l10n.addExpense), style: TextButton.styleFrom(foregroundColor: DS.indigo))),
+        _row([const Expanded(child: SizedBox()), Padding(padding: const EdgeInsets.only(top: 8), child: Text('${l10n.total}: $_currencySymbol${_total.toStringAsFixed(2)}', style: DS.title(size: 18).copyWith(color: DS.green)))]),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
       doc.addPage(pw.Page(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(40), build: (_) => pw.Column(children: [
-        pw.Text('EXPENSE REPORT', style: _ts(fontSize: 22, bold: true, color: PdfColors.green700)),
+        pw.Text(l10n.expenseReportTitle, style: _ts(fontSize: 22, bold: true, color: PdfColors.green700)),
         pw.SizedBox(height: 10),
-        pw.Row(children: [pw.Text('Employee: ${_employee.text}', style: _ts(fontSize: 11)), pw.Spacer(), pw.Text('Date: ${_date.text}', style: _ts(fontSize: 11))]),
-        pw.Text('Department: ${_dept.text}', style: _ts(fontSize: 11)),
+        pw.Row(children: [pw.Text('${l10n.employee}: ${_employee.text}', style: _ts(fontSize: 11)), pw.Spacer(), pw.Text('${l10n.date}: ${_date.text}', style: _ts(fontSize: 11))]),
+        pw.Text('${l10n.department}: ${_dept.text}', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 16),
-        pw.Container(color: PdfColors.green700, padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6), child: pw.Row(children: [pw.Expanded(flex: 3, child: pw.Text('Description', style: _ts(fontSize: 10, bold: true, color: PdfColors.white))), pw.Expanded(child: pw.Text('Amount', style: _ts(fontSize: 10, bold: true, color: PdfColors.white), textAlign: pw.TextAlign.right))])),
+        pw.Container(color: PdfColors.green700, padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6), child: pw.Row(children: [pw.Expanded(flex: 3, child: pw.Text(l10n.description, style: _ts(fontSize: 10, bold: true, color: PdfColors.white))), pw.Expanded(child: pw.Text(l10n.amount, style: _ts(fontSize: 10, bold: true, color: PdfColors.white), textAlign: pw.TextAlign.right))])),
         ..._items.asMap().entries.map((e) {
           final amt = double.tryParse(e.value['amount']!.text) ?? 0;
           return pw.Container(color: e.key.isEven ? PdfColors.grey100 : PdfColors.white, padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 5), child: pw.Row(children: [pw.Expanded(flex: 3, child: pw.Text(e.value['desc']!.text, style: _ts(fontSize: 9))), pw.Expanded(child: pw.Text('$_currencySymbol${amt.toStringAsFixed(2)}', style: _ts(fontSize: 9), textAlign: pw.TextAlign.right))]));
         }),
         pw.Divider(),
-        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.end, children: [pw.Text('TOTAL  $_currencySymbol${_total.toStringAsFixed(2)}', style: _ts(fontSize: 14, bold: true, color: PdfColors.green700))]),
+        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.end, children: [pw.Text('${l10n.total.toUpperCase()}  $_currencySymbol${_total.toStringAsFixed(2)}', style: _ts(fontSize: 14, bold: true, color: PdfColors.green700))]),
       ])));
       final (path, bytes) = await _savePdf(doc, 'expense_${DateTime.now().millisecondsSinceEpoch}');
       if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
@@ -1189,34 +1234,38 @@ class _FreelanceContractState extends State<FreelanceContractForm> {
   bool _b = false;
 
   @override
-  Widget build(BuildContext c) => _Scaffold(
-    title: 'Freelance Contract',
-    icon: Icons.person_rounded,
-    color: DS.purple,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      Row(children: [const Text('Currency: ', style: TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
-      _row([Expanded(child: _field('Freelancer', _freelancer)), Expanded(child: _field('Client', _client))]),
-      _field('Scope of Work', _scope, maxLines: 3),
-      _row([Expanded(child: _field('Hourly Rate / Fixed Fee', _rate)), Expanded(child: _field('Deadline', _deadline))]),
-    ]),
-  );
+  Widget build(BuildContext c) {
+    final l10n = AppLocalizations.of(c)!;
+    return _Scaffold(
+      title: l10n.freelanceContract,
+      icon: Icons.person_rounded,
+      color: DS.purple,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        Row(children: [Text('${l10n.currency}: ', style: const TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
+        _row([Expanded(child: _field(l10n.freelancer, _freelancer)), Expanded(child: _field(l10n.client, _client))]),
+        _field(l10n.scopeOfWork, _scope, maxLines: 3),
+        _row([Expanded(child: _field(l10n.hourlyRateFixed, _rate)), Expanded(child: _field(l10n.deadline, _deadline))]),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
       doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(50), build: (_) => [
-        pw.Text('FREELANCE CONTRACT', style: _ts(fontSize: 20, bold: true)),
+        pw.Text(l10n.freelanceContractTitle, style: _ts(fontSize: 20, bold: true)),
         pw.SizedBox(height: 16),
-        pw.Text('This Agreement is between ${_freelancer.text} ("Freelancer") and ${_client.text} ("Client").', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.freelanceContractIntro1} ${_freelancer.text} ${l10n.freelanceContractIntro2} ${_client.text} ${l10n.freelanceContractIntro3}', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 12),
-        pw.Text('Scope of Work:', style: _ts(fontSize: 11, bold: true)),
+        pw.Text('${l10n.scopeOfWork}:', style: _ts(fontSize: 11, bold: true)),
         pw.Container(padding: const pw.EdgeInsets.all(8), decoration: pw.BoxDecoration(border: pw.Border.all()), child: pw.Text(_scope.text, style: _ts(fontSize: 10))),
         pw.SizedBox(height: 8),
-        pw.Row(children: [pw.Text('Compensation: $_currencySymbol${_rate.text}', style: _ts(fontSize: 11)), pw.Spacer(), pw.Text('Deadline: ${_deadline.text}', style: _ts(fontSize: 11))]),
+        pw.Row(children: [pw.Text('${l10n.compensation}: $_currencySymbol${_rate.text}', style: _ts(fontSize: 11)), pw.Spacer(), pw.Text('${l10n.deadline}: ${_deadline.text}', style: _ts(fontSize: 11))]),
         pw.SizedBox(height: 40),
         pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_freelancer.text}', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_client.text}', style: _ts(fontSize: 9))]))]),
       ]));
@@ -1248,36 +1297,40 @@ class _RentalAgreementState extends State<RentalAgreementForm> {
   bool _b = false;
 
   @override
-  Widget build(BuildContext c) => _Scaffold(
-    title: 'Rental Agreement',
-    icon: Icons.home_rounded,
-    color: DS.orange,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      Row(children: [const Text('Currency: ', style: TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
-      _row([Expanded(child: _field('Landlord', _landlord)), Expanded(child: _field('Tenant', _tenant))]),
-      _field('Property Address', _property),
-      _row([Expanded(child: _field('Monthly Rent', _rent)), Expanded(child: _field('Start Date', _start)), Expanded(child: _field('End Date', _end))]),
-    ]),
-  );
+  Widget build(BuildContext c) {
+    final l10n = AppLocalizations.of(c)!;
+    return _Scaffold(
+      title: l10n.rentalAgreement,
+      icon: Icons.home_rounded,
+      color: DS.orange,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        Row(children: [Text('${l10n.currency}: ', style: const TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
+        _row([Expanded(child: _field(l10n.landlord, _landlord)), Expanded(child: _field(l10n.tenant, _tenant))]),
+        _field(l10n.propertyAddress, _property),
+        _row([Expanded(child: _field(l10n.monthlyRent, _rent)), Expanded(child: _field(l10n.startDate, _start)), Expanded(child: _field(l10n.endDate, _end))]),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
       doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(50), build: (_) => [
-        pw.Text('RESIDENTIAL RENTAL AGREEMENT', style: _ts(fontSize: 18, bold: true)),
+        pw.Text(l10n.rentalAgreementTitle, style: _ts(fontSize: 18, bold: true)),
         pw.SizedBox(height: 16),
-        pw.Text('This Agreement is made between ${_landlord.text} ("Landlord") and ${_tenant.text} ("Tenant") for the property at ${_property.text}.', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.rentalAgreementIntro1} ${_landlord.text} ${l10n.rentalAgreementIntro2} ${_tenant.text} ${l10n.rentalAgreementIntro3} ${_property.text}.', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 12),
-        pw.Text('Term: From ${_start.text} to ${_end.text}.', style: _ts(fontSize: 11)),
-        pw.Text('Monthly Rent: $_currencySymbol${_rent.text}.', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.term}: ${l10n.from} ${_start.text} ${l10n.to} ${_end.text}.', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.monthlyRent}: $_currencySymbol${_rent.text}.', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 20),
-        pw.Text('Additional terms: Tenant agrees to maintain the property and pay utilities.', style: _ts(fontSize: 10, color: PdfColors.grey600)),
+        pw.Text(l10n.additionalTerms, style: _ts(fontSize: 10, color: PdfColors.grey600)),
         pw.SizedBox(height: 40),
-        pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_landlord.text}  Signature', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_tenant.text}  Signature', style: _ts(fontSize: 9))]))]),
+        pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_landlord.text}  ${l10n.signature}', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_tenant.text}  ${l10n.signature}', style: _ts(fontSize: 9))]))]),
       ]));
       final (path, bytes) = await _savePdf(doc, 'rental_agreement_${DateTime.now().millisecondsSinceEpoch}');
       if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
@@ -1303,31 +1356,35 @@ class _NonCompeteState extends State<NonCompeteForm> {
   bool _b = false;
 
   @override
-  Widget build(BuildContext c) => _Scaffold(
-    title: 'Non-Compete',
-    icon: Icons.block_rounded,
-    color: DS.red,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      _row([Expanded(child: _field('Employee', _employee)), Expanded(child: _field('Company', _company))]),
-      _row([Expanded(child: _field('Duration', _duration)), Expanded(child: _field('Geographic Radius', _radius))]),
-    ]),
-  );
+  Widget build(BuildContext c) {
+    final l10n = AppLocalizations.of(c)!;
+    return _Scaffold(
+      title: l10n.nonCompete,
+      icon: Icons.block_rounded,
+      color: DS.red,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        _row([Expanded(child: _field(l10n.employee, _employee)), Expanded(child: _field(l10n.company, _company))]),
+        _row([Expanded(child: _field(l10n.duration, _duration)), Expanded(child: _field(l10n.geographicRadius, _radius))]),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
       doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(50), build: (_) => [
-        pw.Text('NON-COMPETE AGREEMENT', style: _ts(fontSize: 18, bold: true, color: PdfColors.red900)),
+        pw.Text(l10n.nonCompeteTitle, style: _ts(fontSize: 18, bold: true, color: PdfColors.red900)),
         pw.SizedBox(height: 16),
-        pw.Text('This Non-Compete Agreement is between ${_company.text} ("Company") and ${_employee.text} ("Employee").', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.nonCompeteIntro1} ${_company.text} ${l10n.nonCompeteIntro2} ${_employee.text} ${l10n.nonCompeteIntro3}', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 12),
-        pw.Text('For a period of ${_duration.text} within ${_radius.text} of the Company\'s business, Employee agrees not to engage in any competing business.', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.nonCompeteBody1} ${_duration.text} ${l10n.nonCompeteBody2} ${_radius.text} ${l10n.nonCompeteBody3}', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 40),
-        pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_company.text}  Representative', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_employee.text}  Signature', style: _ts(fontSize: 9))]))]),
+        pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_company.text}  ${l10n.representative}', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_employee.text}  ${l10n.signature}', style: _ts(fontSize: 9))]))]),
       ]));
       final (path, bytes) = await _savePdf(doc, 'non_compete_${DateTime.now().millisecondsSinceEpoch}');
       if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
@@ -1356,37 +1413,41 @@ class _EmploymentContractState extends State<EmploymentContractForm> {
   bool _b = false;
 
   @override
-  Widget build(BuildContext c) => _Scaffold(
-    title: 'Employment Contract',
-    icon: Icons.work_rounded,
-    color: DS.indigo,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      Row(children: [const Text('Currency: ', style: TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
-      _row([Expanded(child: _field('Employee', _employee)), Expanded(child: _field('Employer', _employer))]),
-      _row([Expanded(child: _field('Position', _position)), Expanded(child: _field('Start Date', _start))]),
-      _field('Annual Salary', _salary),
-    ]),
-  );
+  Widget build(BuildContext c) {
+    final l10n = AppLocalizations.of(c)!;
+    return _Scaffold(
+      title: l10n.employmentContract,
+      icon: Icons.work_rounded,
+      color: DS.indigo,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        Row(children: [Text('${l10n.currency}: ', style: const TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
+        _row([Expanded(child: _field(l10n.employee, _employee)), Expanded(child: _field(l10n.employer, _employer))]),
+        _row([Expanded(child: _field(l10n.position, _position)), Expanded(child: _field(l10n.startDate, _start))]),
+        _field(l10n.annualSalary, _salary),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
       doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(50), build: (_) => [
-        pw.Text('EMPLOYMENT CONTRACT', style: _ts(fontSize: 20, bold: true, color: PdfColors.indigo900)),
+        pw.Text(l10n.employmentContractTitle, style: _ts(fontSize: 20, bold: true, color: PdfColors.indigo900)),
         pw.SizedBox(height: 16),
-        pw.Text('This Employment Contract is entered into between ${_employer.text} ("Employer") and ${_employee.text} ("Employee").', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.employmentContractIntro1} ${_employer.text} ${l10n.employmentContractIntro2} ${_employee.text} ${l10n.employmentContractIntro3}', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 12),
-        pw.Text('Position: ${_position.text}', style: _ts(fontSize: 11)),
-        pw.Text('Start Date: ${_start.text}', style: _ts(fontSize: 11)),
-        pw.Text('Annual Salary: $_currencySymbol${_salary.text}', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.position}: ${_position.text}', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.startDate}: ${_start.text}', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.annualSalary}: $_currencySymbol${_salary.text}', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 20),
-        pw.Text('Standard terms: 40 hours/week, 15 days paid leave.', style: _ts(fontSize: 9, color: PdfColors.grey600)),
+        pw.Text(l10n.standardTerms, style: _ts(fontSize: 9, color: PdfColors.grey600)),
         pw.SizedBox(height: 40),
-        pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_employer.text}  Signature', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_employee.text}  Signature', style: _ts(fontSize: 9))]))]),
+        pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_employer.text}  ${l10n.signature}', style: _ts(fontSize: 9))])), pw.SizedBox(width: 40), pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_employee.text}  ${l10n.signature}', style: _ts(fontSize: 9))]))]),
       ]));
       final (path, bytes) = await _savePdf(doc, 'employment_contract_${DateTime.now().millisecondsSinceEpoch}');
       if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
@@ -1413,39 +1474,42 @@ class _TerminationLetterState extends State<TerminationLetterForm> {
   static String _today() => '${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}';
 
   @override
-  Widget build(BuildContext c) => _Scaffold(
-    title: 'Termination Letter',
-    icon: Icons.exit_to_app_rounded,
-    color: DS.red,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      _row([Expanded(child: _field('Employee', _employee)), Expanded(child: _field('Company', _company))]),
-      _field('Reason for Termination', _reason, maxLines: 3),
-      _field('Effective Date', _effective),
-    ]),
-  );
+  Widget build(BuildContext c) {
+    final l10n = AppLocalizations.of(c)!;
+    return _Scaffold(
+      title: l10n.terminationLetter,
+      icon: Icons.exit_to_app_rounded,
+      color: DS.red,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        _row([Expanded(child: _field(l10n.employee, _employee)), Expanded(child: _field(l10n.company, _company))]),
+        _field(l10n.reasonTermination, _reason, maxLines: 3),
+        _field(l10n.effectiveDate, _effective),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
-     // Inside TerminationLetterForm._gen()
       doc.addPage(pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(50),
         build: (_) => [
-          pw.Text('TERMINATION LETTER', style: _ts(fontSize: 20, bold: true, color: PdfColors.red900)),
+          pw.Text(l10n.terminationLetterTitle, style: _ts(fontSize: 20, bold: true, color: PdfColors.red900)),
           pw.SizedBox(height: 16),
-          pw.Text('Dear ${_employee.text},', style: _ts(fontSize: 12)),
+          pw.Text('${l10n.dear} ${_employee.text},', style: _ts(fontSize: 12)),
           pw.SizedBox(height: 10),
-          pw.Text('This letter confirms the termination of your employment with ${_company.text}, effective ${_effective.text}.', style: _ts(fontSize: 11)),
-          pw.Text('Reason: ${_reason.text}', style: _ts(fontSize: 11).copyWith(fontStyle: pw.FontStyle.italic)), // ✅ fixed
+          pw.Text('${l10n.terminationLetterBody1} ${_company.text} ${l10n.terminationLetterBody2} ${_effective.text}.', style: _ts(fontSize: 11)),
+          pw.Text('${l10n.reason}: ${_reason.text}', style: _ts(fontSize: 11).copyWith(fontStyle: pw.FontStyle.italic)),
           pw.SizedBox(height: 20),
-          pw.Text('Please return all company property. Your final paycheck will be processed.', style: _ts(fontSize: 10)),
+          pw.Text(l10n.terminationLetterFooter, style: _ts(fontSize: 10)),
           pw.SizedBox(height: 40),
-          pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_company.text}  Representative', style: _ts(fontSize: 9))]))]),
+          pw.Row(children: [pw.Expanded(child: pw.Column(children: [pw.Divider(), pw.Text('${_company.text}  ${l10n.representative}', style: _ts(fontSize: 9))]))]),
         ],
       ));
       final (path, bytes) = await _savePdf(doc, 'termination_${_employee.text.replaceAll(' ', '_')}');
@@ -1475,37 +1539,41 @@ class _BusinessProposalState extends State<BusinessProposalForm> {
   bool _b = false;
 
   @override
-  Widget build(BuildContext c) => _Scaffold(
-    title: 'Business Proposal',
-    icon: Icons.lightbulb_rounded,
-    color: DS.orange,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      Row(children: [const Text('Currency: ', style: TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
-      _row([Expanded(child: _field('From', _from)), Expanded(child: _field('To', _to))]),
-      _field('Project / Proposal Title', _project),
-      _row([Expanded(child: _field('Estimated Budget', _budget)), Expanded(child: _field('Timeline', _timeline))]),
-    ]),
-  );
+  Widget build(BuildContext c) {
+    final l10n = AppLocalizations.of(c)!;
+    return _Scaffold(
+      title: l10n.businessProposal,
+      icon: Icons.lightbulb_rounded,
+      color: DS.orange,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        Row(children: [Text('${l10n.currency}: ', style: const TextStyle(color: DS.textSecondary)), CurrencySelector(value: _currency, onChanged: (c) => setState(() => _currency = c))]),
+        _row([Expanded(child: _field(l10n.from, _from)), Expanded(child: _field(l10n.to, _to))]),
+        _field(l10n.projectTitle, _project),
+        _row([Expanded(child: _field(l10n.estimatedBudget, _budget)), Expanded(child: _field(l10n.timeline, _timeline))]),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
       doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(50), build: (_) => [
-        pw.Text('BUSINESS PROPOSAL', style: _ts(fontSize: 22, bold: true, color: PdfColors.orange700)),
+        pw.Text(l10n.businessProposalTitle, style: _ts(fontSize: 22, bold: true, color: PdfColors.orange700)),
         pw.SizedBox(height: 8),
-        pw.Text('Prepared for: ${_to.text}', style: _ts(fontSize: 12)),
-        pw.Text('Prepared by: ${_from.text}', style: _ts(fontSize: 12)),
+        pw.Text('${l10n.preparedFor}: ${_to.text}', style: _ts(fontSize: 12)),
+        pw.Text('${l10n.preparedBy}: ${_from.text}', style: _ts(fontSize: 12)),
         pw.SizedBox(height: 16),
-        pw.Text('Project: ${_project.text}', style: _ts(fontSize: 14, bold: true)),
+        pw.Text('${l10n.project}: ${_project.text}', style: _ts(fontSize: 14, bold: true)),
         pw.SizedBox(height: 8),
-        pw.Text('Budget: $_currencySymbol${_budget.text}', style: _ts(fontSize: 11)),
-        pw.Text('Timeline: ${_timeline.text}', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.budget}: $_currencySymbol${_budget.text}', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.timeline}: ${_timeline.text}', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 16),
-        pw.Text('We are excited to present this proposal. Our team will deliver high-quality results within the agreed timeline.', style: _ts(fontSize: 10)),
+        pw.Text(l10n.businessProposalBody, style: _ts(fontSize: 10)),
       ]));
       final (path, bytes) = await _savePdf(doc, 'proposal_${DateTime.now().millisecondsSinceEpoch}');
       if (mounted) await Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(filePath: path, preloadedBytes: bytes)));
@@ -1532,32 +1600,36 @@ class _MeetingMinutesState extends State<MeetingMinutesForm> {
   static String _today() => '${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}';
 
   @override
-  Widget build(BuildContext c) => _Scaffold(
-    title: 'Meeting Minutes',
-    icon: Icons.event_note_rounded,
-    color: DS.cyan,
-    onGenerate: _b ? null : _gen,
-    building: _b,
-    child: Column(children: [
-      _row([Expanded(child: _field('Project', _project)), Expanded(child: _field('Date', _date))]),
-      _field('Attendees', _attendees, maxLines: 2),
-      _field('Minutes / Decisions', _notes, maxLines: 5),
-    ]),
-  );
+  Widget build(BuildContext c) {
+    final l10n = AppLocalizations.of(c)!;
+    return _Scaffold(
+      title: l10n.meetingMinutes,
+      icon: Icons.event_note_rounded,
+      color: DS.cyan,
+      onGenerate: _b ? null : _gen,
+      building: _b,
+      child: Column(children: [
+        _row([Expanded(child: _field(l10n.project, _project)), Expanded(child: _field(l10n.date, _date))]),
+        _field(l10n.attendees, _attendees, maxLines: 2),
+        _field(l10n.minutesDecisions, _notes, maxLines: 5),
+      ]),
+    );
+  }
 
   Future<void> _gen() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _b = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
       final doc = pw.Document(compress: true);
       doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(50), build: (_) => [
-        pw.Text('MEETING MINUTES', style: _ts(fontSize: 20, bold: true, color: PdfColors.cyan900)),
+        pw.Text(l10n.meetingMinutesTitle, style: _ts(fontSize: 20, bold: true, color: PdfColors.cyan900)),
         pw.SizedBox(height: 8),
-        pw.Text('Project: ${_project.text}   |   Date: ${_date.text}', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.project}: ${_project.text}   |   ${l10n.date}: ${_date.text}', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 8),
-        pw.Text('Attendees: ${_attendees.text}', style: _ts(fontSize: 11)),
+        pw.Text('${l10n.attendees}: ${_attendees.text}', style: _ts(fontSize: 11)),
         pw.SizedBox(height: 12),
-        pw.Text('Minutes:', style: _ts(fontSize: 12, bold: true)),
+        pw.Text('${l10n.minutes}:', style: _ts(fontSize: 12, bold: true)),
         pw.Container(padding: const pw.EdgeInsets.all(10), decoration: pw.BoxDecoration(border: pw.Border.all()), child: pw.Text(_notes.text, style: _ts(fontSize: 10))),
       ]));
       final (path, bytes) = await _savePdf(doc, 'meeting_minutes_${DateTime.now().millisecondsSinceEpoch}');
@@ -1674,8 +1746,9 @@ class _ResumeFormState extends State<ResumeForm> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return _Scaffold(
-      title: 'Resume / CV',
+      title: l10n.resume,
       icon: Icons.description_rounded,
       color: _teal,
       onGenerate: _building ? null : _generate,
@@ -1687,9 +1760,9 @@ class _ResumeFormState extends State<ResumeForm> {
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(color: DS.bgCard, borderRadius: BorderRadius.circular(30)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            _profileToggle('Fresher', ProfileType.fresher),
+            _profileToggle(l10n.fresher, ProfileType.fresher),
             const SizedBox(width: 8),
-            _profileToggle('Experienced', ProfileType.experienced),
+            _profileToggle(l10n.experienced, ProfileType.experienced),
           ]),
         ),
         // Photo upload
@@ -1697,39 +1770,39 @@ class _ResumeFormState extends State<ResumeForm> {
           if (_photoBytes != null) CircleAvatar(radius: 30, backgroundImage: MemoryImage(_photoBytes!))
           else CircleAvatar(radius: 30, backgroundColor: DS.bgCard2, child: const Icon(Icons.person, color: DS.textSecondary)),
           const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Photo (optional)', style: DS.body(size:13).copyWith(fontWeight: FontWeight.w600)), Text('Appears on resume', style: DS.caption().copyWith(fontSize: 11))])),
-          TextButton(onPressed: _pickPhoto, child: Text(_photoBytes != null ? 'Change' : 'Upload', style: const TextStyle(color: DS.indigo, fontSize: 12, fontWeight: FontWeight.w600))),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(l10n.photoOptional, style: DS.body(size:13).copyWith(fontWeight: FontWeight.w600)), Text(l10n.photoHint, style: DS.caption().copyWith(fontSize: 11))])),
+          TextButton(onPressed: _pickPhoto, child: Text(_photoBytes != null ? l10n.change : l10n.upload, style: const TextStyle(color: DS.indigo, fontSize: 12, fontWeight: FontWeight.w600))),
         ])),
-        const SectionHeader('PERSONAL DETAILS'),
-        _field('Full Name', _fullName),
-        _field('Job Title (optional)', _jobTitle),
-        _row([Expanded(child: _field('Email', _email)), Expanded(child: _field('Phone', _phone))]),
-        _row([Expanded(child: _field('Location', _location)), Expanded(child: _field('LinkedIn / Portfolio', _linkedin))]),
-        if (_profileType == ProfileType.experienced) _field('Professional Summary', _summary, maxLines: 3),
-        const SectionHeader('EDUCATION'),
-        _row([Expanded(child: _field('Degree', _degree)), Expanded(child: _field('Institution', _institution))]),
-        _row([Expanded(child: _field('Year / Duration', _eduYear)), Expanded(child: _field('GPA / Percentage', _gpa))]),
-        SectionHeader(_profileType == ProfileType.fresher ? 'INTERNSHIPS' : 'WORK EXPERIENCE'),
+        SectionHeader(l10n.personalDetails),
+        _field(l10n.fullName, _fullName),
+        _field(l10n.jobTitleOptional, _jobTitle),
+        _row([Expanded(child: _field(l10n.email, _email)), Expanded(child: _field(l10n.phone, _phone))]),
+        _row([Expanded(child: _field(l10n.location, _location)), Expanded(child: _field(l10n.linkedinPortfolio, _linkedin))]),
+        if (_profileType == ProfileType.experienced) _field(l10n.professionalSummary, _summary, maxLines: 3),
+        SectionHeader(l10n.education),
+        _row([Expanded(child: _field(l10n.degree, _degree)), Expanded(child: _field(l10n.institution, _institution))]),
+        _row([Expanded(child: _field(l10n.yearDuration, _eduYear)), Expanded(child: _field(l10n.gpa, _gpa))]),
+        SectionHeader(_profileType == ProfileType.fresher ? l10n.internships : l10n.workExperience),
         ..._workExperiences.asMap().entries.map((e) => _dynamicCard(
           index: e.key,
-          title: _profileType == ProfileType.fresher ? 'Internship' : 'Experience',
+          title: _profileType == ProfileType.fresher ? l10n.internship : l10n.experience,
           controllers: e.value,
           fields: const ['title', 'company', 'date', 'desc'],
-          labels: const ['Title / Role', 'Company', 'Duration', 'Description (bullet points)'],
+          labels: [l10n.titleRole, l10n.company, l10n.duration, l10n.descriptionBullets],
           onDelete: _workExperiences.length > 1 ? () => setState(() => _workExperiences.removeAt(e.key)) : null,
         )),
-        TextButton.icon(onPressed: _addWorkExperience, icon: const Icon(Icons.add, size: 16), label: Text(_profileType == ProfileType.fresher ? 'Add Internship' : 'Add Work Experience'), style: TextButton.styleFrom(foregroundColor: _teal)),
-        const SectionHeader('PROJECTS'),
+        TextButton.icon(onPressed: _addWorkExperience, icon: const Icon(Icons.add, size: 16), label: Text(_profileType == ProfileType.fresher ? l10n.addInternship : l10n.addWorkExperience), style: TextButton.styleFrom(foregroundColor: _teal)),
+        SectionHeader(l10n.projects),
         ..._projects.asMap().entries.map((e) => _dynamicCard(
           index: e.key,
-          title: 'Project',
+          title: l10n.project,
           controllers: e.value,
           fields: const ['name', 'tech', 'desc'],
-          labels: const ['Project Name', 'Technologies Used', 'Description'],
+          labels: [l10n.projectName, l10n.technologiesUsed, l10n.description],
           onDelete: _projects.length > 1 ? () => setState(() => _projects.removeAt(e.key)) : null,
         )),
-        TextButton.icon(onPressed: _addProject, icon: const Icon(Icons.add, size: 16), label: const Text('Add Project'), style: TextButton.styleFrom(foregroundColor: _teal)),
-        const SectionHeader('SKILLS'),
+        TextButton.icon(onPressed: _addProject, icon: const Icon(Icons.add, size: 16), label: Text(l10n.addProject), style: TextButton.styleFrom(foregroundColor: _teal)),
+        SectionHeader(l10n.skills),
         Wrap(spacing: 8, runSpacing: 8, children: [
           ..._skills.asMap().entries.map((e) => Chip(
             label: Text(e.value.text, style: const TextStyle(color: Colors.white, fontSize: 12)),
@@ -1738,32 +1811,32 @@ class _ResumeFormState extends State<ResumeForm> {
             onDeleted: () => setState(() => _skills.removeAt(e.key)),
           )),
           ActionChip(
-            label: const Text('+ Add Skill', style: TextStyle(color: _teal, fontSize: 12)),
+            label: Text('+ ${l10n.addSkill}', style: TextStyle(color: _teal, fontSize: 12)),
             onPressed: _addSkill,
             backgroundColor: DS.bgCard,
           ),
         ]),
-        const SectionHeader('CERTIFICATIONS'),
+        SectionHeader(l10n.certifications),
         ..._certifications.asMap().entries.map((e) => _dynamicCard(
           index: e.key,
-          title: 'Certification',
+          title: l10n.certification,
           controllers: e.value,
           fields: const ['name', 'org', 'year'],
-          labels: const ['Certification Name', 'Issuing Organization', 'Year'],
+          labels: [l10n.certificationName, l10n.issuingOrg, l10n.year],
           onDelete: _certifications.length > 1 ? () => setState(() => _certifications.removeAt(e.key)) : null,
         )),
-        TextButton.icon(onPressed: _addCertification, icon: const Icon(Icons.add, size: 16), label: const Text('Add Certification'), style: TextButton.styleFrom(foregroundColor: _teal)),
-        const SectionHeader('ACHIEVEMENTS'),
+        TextButton.icon(onPressed: _addCertification, icon: const Icon(Icons.add, size: 16), label: Text(l10n.addCertification), style: TextButton.styleFrom(foregroundColor: _teal)),
+        SectionHeader(l10n.achievements),
         ..._achievements.asMap().entries.map((e) => Container(
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(color: DS.bgCard, borderRadius: BorderRadius.circular(8), border: Border.all(color: DS.separator)),
           child: Row(children: [
-            Expanded(child: TextField(controller: e.value, style: const TextStyle(color: Colors.white, fontSize: 13), decoration: const InputDecoration(border: InputBorder.none, hintText: 'Achievement', hintStyle: TextStyle(color: DS.textSecondary)))),
+            Expanded(child: TextField(controller: e.value, style: const TextStyle(color: Colors.white, fontSize: 13), decoration: InputDecoration(border: InputBorder.none, hintText: l10n.achievementHint, hintStyle: const TextStyle(color: DS.textSecondary)))),
             IconButton(icon: const Icon(Icons.close, size: 18, color: DS.red), onPressed: () => setState(() => _achievements.removeAt(e.key))),
           ]),
         )),
-        TextButton.icon(onPressed: _addAchievement, icon: const Icon(Icons.add, size: 16), label: const Text('Add Achievement'), style: TextButton.styleFrom(foregroundColor: _teal)),
+        TextButton.icon(onPressed: _addAchievement, icon: const Icon(Icons.add, size: 16), label: Text(l10n.addAchievement), style: TextButton.styleFrom(foregroundColor: _teal)),
         const SizedBox(height: 20),
       ]),
     );
@@ -1798,6 +1871,7 @@ class _ResumeFormState extends State<ResumeForm> {
   }
 
   Future<void> _generate() async {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _building = true);
     await PdfSaveService.ensureFontsLoaded();
     try {
@@ -1828,13 +1902,13 @@ class _ResumeFormState extends State<ResumeForm> {
             pw.Divider(),
           ],
           // Education
-          _sectionHeader('EDUCATION'),
+          _sectionHeader(l10n.education),
           pw.Row(children: [pw.Expanded(child: pw.Text(_degree.text, style: _ts(fontSize: 11, bold: true))), pw.Text(_eduYear.text, style: _ts(fontSize: 10, color: PdfColors.grey600))]),
           pw.Text(_institution.text, style: _ts(fontSize: 10)),
           if (_gpa.text.isNotEmpty) pw.Text('GPA: ${_gpa.text}', style: _ts(fontSize: 9, color: PdfColors.grey700)),
           pw.SizedBox(height: 8),
           // Work Experience
-          _sectionHeader(_profileType == ProfileType.fresher ? 'INTERNSHIPS' : 'WORK EXPERIENCE'),
+          _sectionHeader(_profileType == ProfileType.fresher ? l10n.internships : l10n.workExperience),
           ..._workExperiences.map((exp) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
             pw.Row(children: [pw.Expanded(child: pw.Text(exp['title']!.text, style: _ts(fontSize: 11, bold: true))), pw.Text(exp['date']!.text, style: _ts(fontSize: 10, color: PdfColors.grey600))]),
             pw.Text(exp['company']!.text, style: _ts(fontSize: 10)),
@@ -1843,27 +1917,27 @@ class _ResumeFormState extends State<ResumeForm> {
           ])),
           // Projects
           if (_projects.isNotEmpty) ...[
-            _sectionHeader('PROJECTS'),
+            _sectionHeader(l10n.projects),
             ..._projects.map((proj) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
               pw.Text(proj['name']!.text, style: _ts(fontSize: 11, bold: true)),
-              pw.Text('Tech: ${proj['tech']!.text}', style: _ts(fontSize: 9, color: PdfColors.grey700)),
+              pw.Text('${l10n.tech}: ${proj['tech']!.text}', style: _ts(fontSize: 9, color: PdfColors.grey700)),
               pw.Text(proj['desc']!.text, style: _ts(fontSize: 9)),
               pw.SizedBox(height: 6),
             ])),
           ],
           // Skills
-          _sectionHeader('SKILLS'),
+          _sectionHeader(l10n.skills),
           pw.Text(_skills.map((s) => s.text).join(', '), style: _ts(fontSize: 9)),
           pw.SizedBox(height: 8),
           // Certifications
           if (_certifications.isNotEmpty) ...[
-            _sectionHeader('CERTIFICATIONS'),
+            _sectionHeader(l10n.certifications),
             ..._certifications.map((cert) => pw.Text('• ${cert['name']!.text} (${cert['org']!.text}, ${cert['year']!.text})', style: _ts(fontSize: 9))),
             pw.SizedBox(height: 8),
           ],
           // Achievements
           if (_achievements.isNotEmpty) ...[
-            _sectionHeader('ACHIEVEMENTS'),
+            _sectionHeader(l10n.achievements),
             ..._achievements.map((ach) => pw.Text( '• ${ach.text}', style: _ts(fontSize: 9))),
           ],
         ],
@@ -1898,45 +1972,48 @@ class _Scaffold extends StatelessWidget {
   const _Scaffold({required this.title, required this.icon, required this.color, required this.child, this.onGenerate, required this.building});
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: DS.bg,
-    appBar: AppBar(
-      backgroundColor: DS.bgCard,
-      surfaceTintColor: Colors.transparent,
-      elevation: 0,
-      leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20), onPressed: () => Navigator.pop(context)),
-      title: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, color: color, size: 18), const SizedBox(width: 8), Text(title, style: GoogleFonts.inter(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600))]),
-      centerTitle: true,
-      actions: [
-        if (onGenerate != null)
-          TextButton(
-            onPressed: building ? null : onGenerate,
-            child: building
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: DS.indigo))
-                : Text('Generate PDF', style: GoogleFonts.inter(color: DS.indigo, fontSize: 14, fontWeight: FontWeight.w600)),
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Scaffold(
+      backgroundColor: DS.bg,
+      appBar: AppBar(
+        backgroundColor: DS.bgCard,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20), onPressed: () => Navigator.pop(context)),
+        title: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, color: color, size: 18), const SizedBox(width: 8), Text(title, style: GoogleFonts.inter(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600))]),
+        centerTitle: true,
+        actions: [
+          if (onGenerate != null)
+            TextButton(
+              onPressed: building ? null : onGenerate,
+              child: building
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: DS.indigo))
+                  : Text(l10n.generatePdf, style: GoogleFonts.inter(color: DS.indigo, fontSize: 14, fontWeight: FontWeight.w600)),
+            ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: Column(children: [
+          child,
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton.icon(
+              onPressed: building ? null : onGenerate,
+              icon: building ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.picture_as_pdf_rounded, size: 20),
+              label: Text(building ? l10n.generating : l10n.generatePdf, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+            ),
           ),
-      ],
-    ),
-    body: SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(16),
-      child: Column(children: [
-        child,
-        const SizedBox(height: 20),
-        SizedBox(
-          width: double.infinity,
-          height: 50,
-          child: ElevatedButton.icon(
-            onPressed: building ? null : onGenerate,
-            icon: building ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.picture_as_pdf_rounded, size: 20),
-            label: Text(building ? 'Generating...' : 'Generate PDF', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-            style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-          ),
-        ),
-        const SizedBox(height: 40),
-      ]),
-    ),
-  );
+          const SizedBox(height: 40),
+        ]),
+      ),
+    );
+  }
 }
 
 Widget _field(String label, TextEditingController ctrl, {int maxLines = 1, VoidCallback? onChanged}) => Padding(
@@ -1958,17 +2035,20 @@ class _ItemRow extends StatelessWidget {
   const _ItemRow({required this.index, required this.ctrls, this.onDelete, required this.onChanged});
 
   @override
-  Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.only(bottom: 10),
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(color: DS.bgCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: DS.separator)),
-    child: Column(children: [
-      Row(children: [Text('#$index', style: DS.caption()), const Spacer(), if (onDelete != null) GestureDetector(onTap: onDelete, child: const Icon(Icons.close_rounded, color: DS.red, size: 18))]),
-      const SizedBox(height: 8),
-      _field('Description', ctrls['desc']!, onChanged: onChanged),
-      Row(children: [Expanded(child: _field('Qty', ctrls['qty']!, onChanged: onChanged)), const SizedBox(width: 10), Expanded(child: _field('Rate (\$)', ctrls['rate']!, onChanged: onChanged))]),
-    ]),
-  );
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: DS.bgCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: DS.separator)),
+      child: Column(children: [
+        Row(children: [Text('#$index', style: DS.caption()), const Spacer(), if (onDelete != null) GestureDetector(onTap: onDelete, child: const Icon(Icons.close_rounded, color: DS.red, size: 18))]),
+        const SizedBox(height: 8),
+        _field(l10n.description, ctrls['desc']!, onChanged: onChanged),
+        Row(children: [Expanded(child: _field(l10n.qty, ctrls['qty']!, onChanged: onChanged)), const SizedBox(width: 10), Expanded(child: _field(l10n.rate, ctrls['rate']!, onChanged: onChanged))]),
+      ]),
+    );
+  }
 }
 
 class SectionHeader extends StatelessWidget {

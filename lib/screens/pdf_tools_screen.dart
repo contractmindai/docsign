@@ -17,6 +17,7 @@ import 'package:image/image.dart' as img;
 import '../utils/platform_file_service.dart';
 import '../widgets/ds.dart';
 import '../widgets/apple_dialog.dart';
+import '../utils/app_localizations.dart'; // for AppLocalizations
 
 class PdfToolsScreen extends StatefulWidget {
   final String filePath;
@@ -70,12 +71,12 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
           _doc = await pdfrx.PdfDocument.openData(bytes);
           _pageCount = _doc!.pages.length;
         } else {
-          if (mounted) _snack('Cannot open file', err: true);
+          if (mounted) _snack(AppLocalizations.of(context)!.cannotOpenFile, err: true);
         }
       }
     } catch (e) {
       debugPrint('Error loading PDF in tools: $e');
-      if (mounted) _snack('Error: $e', err: true);
+      if (mounted) _snack('${AppLocalizations.of(context)!.error}: $e', err: true);
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -103,27 +104,32 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
   }
 
   Future<bool> _checkSize(String op, {int warn = 20, int max = 80}) async {
+    final l10n = AppLocalizations.of(context)!;
     if (_pageCount <= warn) return true;
-    if (_pageCount > max) { _snack('Max $max pages', err: true); return false; }
+    if (_pageCount > max) {
+      _snack('${l10n.maxPages} $max', err: true);
+      return false;
+    }
     return await AppleDialog.show<bool>(
       context: context,
-      title: 'Large Document',
-      content: '$_pageCount pages. $op may be slow.',
+      title: l10n.largeDocument,
+      content: '$_pageCount ${l10n.pages} $op ${l10n.mayBeSlow}',
       actions: [
-        AppleDialogAction(label: 'Cancel', onPressed: () => Navigator.pop(context, false)),
-        AppleDialogAction(label: 'Continue', onPressed: () => Navigator.pop(context, true)),
+        AppleDialogAction(label: l10n.cancel, onPressed: () => Navigator.pop(context, false)),
+        AppleDialogAction(label: l10n.continue_, onPressed: () => Navigator.pop(context, true)),
       ],
     ) ?? false;
   }
 
   // ═══ MERGE ═══
   Future<void> _mergePdfs() async {
+    final l10n = AppLocalizations.of(context)!;
     if (_doc == null) return;
-    if (!await _checkSize('Merging', warn: 15, max: 50)) return;
+    if (!await _checkSize(l10n.merging, warn: 15, max: 50)) return;
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom, allowedExtensions: ['pdf'], allowMultiple: true, withData: kIsWeb);
     if (result == null || result.files.isEmpty) return;
-    _showProgress('Merging...');
+    _showProgress(l10n.merging);
     try {
       final merged = pw.Document();
       Future<void> addDoc(pdfrx.PdfDocument d) async {
@@ -148,15 +154,16 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
         _finish(bytes, 'merged_${DateTime.now().millisecondsSinceEpoch}.pdf');
       }
     } catch (e) {
-      if (mounted) { Navigator.pop(context); _snack('Error: $e', err: true); }
+      if (mounted) { Navigator.pop(context); _snack('${l10n.error}: $e', err: true); }
     }
   }
 
   // ═══ EXTRACT ═══
   Future<void> _extractPages() async {
-    if (_doc == null || _selectedPages.isEmpty) { _snack('Select pages', err: true); return; }
-    if (_selectedPages.length > 30) { _snack('Max 30 pages', err: true); return; }
-    _showProgress('Extracting...');
+    final l10n = AppLocalizations.of(context)!;
+    if (_doc == null || _selectedPages.isEmpty) { _snack(l10n.selectPages, err: true); return; }
+    if (_selectedPages.length > 30) { _snack('${l10n.maxPages} 30', err: true); return; }
+    _showProgress(l10n.extracting);
     try {
       final doc = pw.Document();
       for (final i in _selectedPages.toList()..sort()) {
@@ -172,107 +179,102 @@ class _PdfToolsScreenState extends State<PdfToolsScreen> {
         _finish(bytes, 'extract_${DateTime.now().millisecondsSinceEpoch}.pdf');
       }
     } catch (e) {
-      if (mounted) { Navigator.pop(context); _snack('Error: $e', err: true); }
+      if (mounted) { Navigator.pop(context); _snack('${l10n.error}: $e', err: true); }
     }
   }
 
-// ═══ ROTATE (FIXED: uses Transform.rotate for reliable 90° rotation) ═══
-// ═══ ROTATE (pixel‑based, no widget transform) ═══
-// ═══ ROTATE (pixel‑based, no widget transform) ═══
-Future<void> _rotateSelected() async {
-  if (_doc == null || _selectedPages.isEmpty) {
-    _snack('Select pages', err: true);
-    return;
-  }
+  // ═══ ROTATE ═══
+  Future<void> _rotateSelected() async {
+    final l10n = AppLocalizations.of(context)!;
+    if (_doc == null || _selectedPages.isEmpty) {
+      _snack(l10n.selectPages, err: true);
+      return;
+    }
 
-  _showProgress('Rotating...');
+    _showProgress(l10n.rotating);
 
-  try {
-    final doc = pw.Document();
+    try {
+      final doc = pw.Document();
 
-    for (int i = 0; i < _pageCount; i++) {
-      final page = _doc!.pages[i];
-      final bool shouldRotate = _selectedPages.contains(i);
+      for (int i = 0; i < _pageCount; i++) {
+        final page = _doc!.pages[i];
+        final bool shouldRotate = _selectedPages.contains(i);
 
-      // Render at high quality
-      final renderWidth = (page.width * 2).clamp(0.0, 3000.0);
-      final renderHeight = (page.height * 2).clamp(0.0, 4000.0);
-      final rendered = await page.render(
-        fullWidth: renderWidth,
-        fullHeight: renderHeight,
-        backgroundColor: Colors.white,
-      );
-      if (rendered == null) continue;
+        final renderWidth = (page.width * 2).clamp(0.0, 3000.0);
+        final renderHeight = (page.height * 2).clamp(0.0, 4000.0);
+        final rendered = await page.render(
+          fullWidth: renderWidth,
+          fullHeight: renderHeight,
+          backgroundColor: Colors.white,
+        );
+        if (rendered == null) continue;
 
-      Uint8List? png = await _pdfImageToPng(rendered);
-      if (png == null) continue;
+        Uint8List? png = await _pdfImageToPng(rendered);
+        if (png == null) continue;
 
-      // Rotate the image bytes if needed
-      if (shouldRotate) {
-        png = await _rotateImage90(png!);
+        if (shouldRotate) {
+          png = await _rotateImage90(png!);
+        }
+
+        final pageFormat = shouldRotate
+            ? PdfPageFormat(page.height, page.width)
+            : PdfPageFormat(page.width, page.height);
+
+        doc.addPage(
+          pw.Page(
+            pageFormat: pageFormat,
+            margin: pw.EdgeInsets.zero,
+            build: (_) => pw.Image(pw.MemoryImage(png!), fit: pw.BoxFit.fill),
+          ),
+        );
       }
 
-      // Swap page dimensions for rotated pages
-      final pageFormat = shouldRotate
-          ? PdfPageFormat(page.height, page.width)
-          : PdfPageFormat(page.width, page.height);
-
-      doc.addPage(
-        pw.Page(
-          pageFormat: pageFormat,
-          margin: pw.EdgeInsets.zero,
-          build: (_) => pw.Image(pw.MemoryImage(png!), fit: pw.BoxFit.fill),
-        ),
-      );
-    }
-
-    final bytes = Uint8List.fromList(await doc.save());
-    if (mounted) {
-      Navigator.pop(context);
-      _finish(bytes, 'rotated.pdf');
-    }
-  } catch (e) {
-    if (mounted) {
-      Navigator.pop(context);
-      _snack('Rotation failed: $e', err: true);
+      final bytes = Uint8List.fromList(await doc.save());
+      if (mounted) {
+        Navigator.pop(context);
+        _finish(bytes, 'rotated.pdf');
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        _snack('${l10n.rotateFailed}: $e', err: true);
+      }
     }
   }
-}
 
-// Helper: rotate PNG bytes 90° clockwise
-Future<Uint8List> _rotateImage90(Uint8List bytes) async {
-  final codec = await ui.instantiateImageCodec(bytes);
-  final frame = await codec.getNextFrame();
-  final image = frame.image;
+  Future<Uint8List> _rotateImage90(Uint8List bytes) async {
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    final image = frame.image;
 
-  final recorder = ui.PictureRecorder();
-  final canvas = Canvas(recorder);
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
 
-  // Move canvas origin to top‑right and rotate 90° clockwise
-  canvas.translate(image.height.toDouble(), 0);
-  canvas.rotate(1.5708); // π/2 radians = 90°
-  canvas.drawImage(image, Offset.zero, Paint());
+    canvas.translate(image.height.toDouble(), 0);
+    canvas.rotate(1.5708);
+    canvas.drawImage(image, Offset.zero, Paint());
 
-  final picture = recorder.endRecording();
-  final rotatedImage = await picture.toImage(image.height, image.width);
-  final byteData = await rotatedImage.toByteData(format: ui.ImageByteFormat.png);
-  rotatedImage.dispose();
-  image.dispose();
+    final picture = recorder.endRecording();
+    final rotatedImage = await picture.toImage(image.height, image.width);
+    final byteData = await rotatedImage.toByteData(format: ui.ImageByteFormat.png);
+    rotatedImage.dispose();
+    image.dispose();
 
-  return byteData!.buffer.asUint8List();
-}
+    return byteData!.buffer.asUint8List();
+  }
 
   // ═══ WATERMARK ═══
   Future<void> _addWatermark() async {
+    final l10n = AppLocalizations.of(context)!;
     if (_doc == null) return;
-    if (!await _checkSize('Watermarking', warn: 25, max: 80)) return;
+    if (!await _checkSize(l10n.watermarking, warn: 25, max: 80)) return;
     final ctrl = TextEditingController(text: _watermarkText);
     bool applyAll = true;
     Color selectedColor = Colors.red;
-    
+
     final input = await AppleDialog.show<Map>(
       context: context,
-      title: 'Watermark',
+      title: l10n.watermark,
       child: StatefulBuilder(
         builder: (__, setSt) => Column(
           mainAxisSize: MainAxisSize.min,
@@ -282,7 +284,7 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
               autofocus: true,
               style: const TextStyle(color: Colors.white, fontSize: 14),
               decoration: InputDecoration(
-                hintText: 'e.g. CONFIDENTIAL',
+                hintText: l10n.watermarkHint,
                 filled: true,
                 fillColor: DS.bgCard2,
                 border: OutlineInputBorder(
@@ -293,7 +295,7 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
             ),
             const SizedBox(height: 16),
             Row(children: [
-              const Text('Text Color:', style: TextStyle(color: Colors.white60)),
+              Text(l10n.textColor, style: const TextStyle(color: Colors.white60)),
               const SizedBox(width: 12),
               ..._buildTextColorSwatches(selectedColor, (color) {
                 setSt(() => selectedColor = color);
@@ -301,10 +303,10 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
             ]),
             const SizedBox(height: 16),
             Row(children: [
-              const Text('Apply:', style: TextStyle(color: Colors.white60)),
+              Text(l10n.apply, style: const TextStyle(color: Colors.white60)),
               const Spacer(),
               ChoiceChip(
-                label: const Text('All'),
+                label: Text(l10n.all),
                 selected: applyAll,
                 onSelected: (_) => setSt(() => applyAll = true),
                 backgroundColor: Colors.white10,
@@ -312,7 +314,7 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
               ),
               const SizedBox(width: 8),
               ChoiceChip(
-                label: Text('Selected (${_selectedPages.length})'),
+                label: Text('${l10n.selected} (${_selectedPages.length})'),
                 selected: !applyAll,
                 onSelected: (_) => setSt(() => applyAll = false),
                 backgroundColor: Colors.white10,
@@ -323,16 +325,16 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
         ),
       ),
       actions: [
-        AppleDialogAction(label: 'Cancel', onPressed: () => Navigator.pop(context)),
+        AppleDialogAction(label: l10n.cancel, onPressed: () => Navigator.pop(context)),
         AppleDialogAction(
-          label: 'Apply',
+          label: l10n.apply,
           onPressed: () => Navigator.pop(context, {'text': ctrl.text, 'all': applyAll, 'color': selectedColor}),
         ),
       ],
     );
-    
+
     if (input == null || input['text'].toString().isEmpty) return;
-    _showProgress('Watermarking...');
+    _showProgress(l10n.watermarking);
     try {
       final doc = pw.Document();
       final watermarkText = input['text'] as String;
@@ -348,7 +350,7 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
         final children = <pw.Widget>[pw.Image(pw.MemoryImage(png))];
         if (mark) {
           children.add(pw.Center(child: pw.Transform.rotate(angle: -0.4,
-            child: pw.Text(watermarkText, style: pw.TextStyle(fontSize: 60, color: pdfColor, fontWeight: pw.FontWeight.bold)))));
+              child: pw.Text(watermarkText, style: pw.TextStyle(fontSize: 60, color: pdfColor, fontWeight: pw.FontWeight.bold)))));
         }
         doc.addPage(pw.Page(pageFormat: PdfPageFormat(_doc!.pages[i].width, _doc!.pages[i].height), margin: pw.EdgeInsets.zero, build: (_) => pw.Stack(children: children)));
       }
@@ -358,7 +360,7 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
         _finish(bytes, 'wm_${DateTime.now().millisecondsSinceEpoch}.pdf');
       }
     } catch (e) {
-      if (mounted) { Navigator.pop(context); _snack('Error: $e', err: true); }
+      if (mounted) { Navigator.pop(context); _snack('${l10n.error}: $e', err: true); }
     }
   }
 
@@ -396,10 +398,11 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
 
   // ═══ DUPLICATE ═══
   Future<void> _duplicatePage(int pageIndex) async {
+    final l10n = AppLocalizations.of(context)!;
     if (_doc == null) return;
-    if (!await _checkSize('Duplicating', warn: 10, max: 40)) return;
+    if (!await _checkSize(l10n.duplicating, warn: 10, max: 40)) return;
     final pages = _selectedPages.isNotEmpty ? (_selectedPages.toList()..sort()) : [pageIndex];
-    _showProgress('Duplicating...');
+    _showProgress(l10n.duplicating);
     try {
       final doc = pw.Document();
       for (int i = 0; i < _pageCount; i++) {
@@ -416,23 +419,24 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
         _finish(bytes, 'dup_${DateTime.now().millisecondsSinceEpoch}.pdf');
       }
     } catch (e) {
-      if (mounted) { Navigator.pop(context); _snack('Error: $e', err: true); }
+      if (mounted) { Navigator.pop(context); _snack('${l10n.error}: $e', err: true); }
     }
   }
 
   // ═══ QR CODE ═══
   Future<void> _addQrCode() async {
+    final l10n = AppLocalizations.of(context)!;
     if (_doc == null) return;
     final ctrl = TextEditingController();
     final text = await AppleDialog.show<String>(
       context: context,
-      title: 'QR Code',
+      title: l10n.qrCode,
       child: TextField(
         controller: ctrl,
         autofocus: true,
         style: const TextStyle(color: Colors.white, fontSize: 14),
         decoration: InputDecoration(
-          hintText: 'URL or payment link',
+          hintText: l10n.qrHint,
           filled: true,
           fillColor: DS.bgCard2,
           border: OutlineInputBorder(
@@ -442,16 +446,16 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
         ),
       ),
       actions: [
-        AppleDialogAction(label: 'Cancel', onPressed: () => Navigator.pop(context)),
+        AppleDialogAction(label: l10n.cancel, onPressed: () => Navigator.pop(context)),
         AppleDialogAction(
-          label: 'Generate',
+          label: l10n.generate,
           onPressed: () => Navigator.pop(context, ctrl.text),
           isDestructive: false,
         ),
       ],
     );
     if (text == null || text.isEmpty) return;
-    _showProgress('Adding QR...');
+    _showProgress(l10n.addingQr);
     try {
       final qr = QrPainter(data: text, version: QrVersions.auto, color: Colors.black, emptyColor: Colors.white);
       final rec = ui.PictureRecorder();
@@ -470,8 +474,8 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
         doc.addPage(pw.Page(pageFormat: PdfPageFormat(_doc!.pages[i].width, _doc!.pages[i].height), margin: pw.EdgeInsets.zero, build: (_) => pw.Stack(children: [
           pw.Image(pw.MemoryImage(pagePng)),
           pw.Positioned(right: 20, bottom: 20, child: pw.Container(width: 80, height: 80, padding: const pw.EdgeInsets.all(4),
-            decoration: pw.BoxDecoration(color: PdfColors.white, borderRadius: pw.BorderRadius.circular(4)),
-            child: pw.Image(pw.MemoryImage(Uint8List.view(pngBytes.buffer)), fit: pw.BoxFit.contain)))
+              decoration: pw.BoxDecoration(color: PdfColors.white, borderRadius: pw.BorderRadius.circular(4)),
+              child: pw.Image(pw.MemoryImage(Uint8List.view(pngBytes.buffer)), fit: pw.BoxFit.contain)))
         ])));
       }
       final bytes = Uint8List.fromList(await doc.save());
@@ -480,7 +484,7 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
         _finish(bytes, 'qr_${DateTime.now().millisecondsSinceEpoch}.pdf');
       }
     } catch (e) {
-      if (mounted) { Navigator.pop(context); _snack('Error: $e', err: true); }
+      if (mounted) { Navigator.pop(context); _snack('${l10n.error}: $e', err: true); }
     }
   }
 
@@ -535,40 +539,43 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
   void _toggle(int i) => setState(() { _selectedPages.contains(i) ? _selectedPages.remove(i) : _selectedPages.add(i); });
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: DS.bg,
-    appBar: AppBar(
-      backgroundColor: DS.bgCard, 
-      elevation: 0, 
-      surfaceTintColor: Colors.transparent,
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20), 
-        onPressed: () => Navigator.pop(context),
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Scaffold(
+      backgroundColor: DS.bg,
+      appBar: AppBar(
+        backgroundColor: DS.bgCard,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: DS.indigo, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(l10n.pdfTools, style: GoogleFonts.inter(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+        centerTitle: true,
       ),
-      title: Text('PDF Tools', style: GoogleFonts.inter(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
-      centerTitle: true,
-    ),
-    body: _loading
-        ? const Center(child: CircularProgressIndicator(color: DS.indigo))
-        : _pageCount == 0
-            ? Center(child: Text('No PDF loaded', style: DS.body(size: 16)))
-            : Column(children: [
-                _buildTools(),
-                const Divider(color: DS.separator),
-                Expanded(child: _buildGrid()),
-                if (_selectedPages.isNotEmpty) _buildBottom(),
-              ]),
-  );
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: DS.indigo))
+          : _pageCount == 0
+              ? Center(child: Text(l10n.noPdfLoaded, style: DS.body(size: 16)))
+              : Column(children: [
+                  _buildTools(l10n),
+                  const Divider(color: DS.separator),
+                  Expanded(child: _buildGrid(l10n)),
+                  if (_selectedPages.isNotEmpty) _buildBottom(l10n),
+                ]),
+    );
+  }
 
-  Widget _buildTools() => Padding(
+  Widget _buildTools(AppLocalizations l10n) => Padding(
     padding: const EdgeInsets.all(16),
     child: Wrap(spacing: 10, runSpacing: 10, children: [
-      _card('Merge', Icons.merge_rounded, DS.indigo, _mergePdfs),
-      _card('Extract', Icons.content_cut_rounded, DS.orange, _extractPages),
-      _card('Rotate', Icons.rotate_right_rounded, DS.green, _rotateSelected),
-      _card('Watermark', Icons.branding_watermark_rounded, DS.red, _addWatermark),
-      _card('Duplicate', Icons.copy_rounded, DS.cyan, () => _duplicatePage(0)),
-      _card('QR Code', Icons.qr_code_rounded, DS.green, _addQrCode),
+      _card(l10n.merge, Icons.merge_rounded, DS.indigo, _mergePdfs),
+      _card(l10n.extract, Icons.content_cut_rounded, DS.orange, _extractPages),
+      _card(l10n.rotate, Icons.rotate_right_rounded, DS.green, _rotateSelected),
+      _card(l10n.watermark, Icons.branding_watermark_rounded, DS.red, _addWatermark),
+      _card(l10n.duplicate, Icons.copy_rounded, DS.cyan, () => _duplicatePage(0)),
+      _card(l10n.qrCode, Icons.qr_code_rounded, DS.green, _addQrCode),
     ]),
   );
 
@@ -593,7 +600,7 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
     ),
   );
 
-  Widget _buildGrid() {
+  Widget _buildGrid(AppLocalizations l10n) {
     return GridView.builder(
       padding: const EdgeInsets.all(12),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 0.72),
@@ -631,11 +638,11 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
     );
   }
 
-  Widget _buildBottom() => Container(
+  Widget _buildBottom(AppLocalizations l10n) => Container(
     padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(color: DS.bgCard, border: Border(top: BorderSide(color: DS.separator))),
     child: Row(children: [
-      Text('${_selectedPages.length} selected', style: const TextStyle(color: Colors.white, fontSize: 13)),
+      Text('${_selectedPages.length} ${l10n.selected}', style: const TextStyle(color: Colors.white, fontSize: 13)),
       const Spacer(),
       ScaleTap(
         onTap: _extractPages,
@@ -648,7 +655,7 @@ Future<Uint8List> _rotateImage90(Uint8List bytes) async {
           child: Row(children: [
             const Icon(Icons.content_cut_rounded, size: 16, color: Colors.white),
             const SizedBox(width: 6),
-            const Text('Extract', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+            Text(l10n.extract, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
           ]),
         ),
       ),

@@ -43,7 +43,7 @@ android {
         applicationId = "com.contractmind.docsign"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = 5
+        versionCode = 8
         versionName = "2.0.1"
     }
 

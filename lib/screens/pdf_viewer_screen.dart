@@ -36,6 +36,7 @@ import '../widgets/thumbnail_strip.dart';
 import '../widgets/apple_dialog.dart';
 import 'document_compare_screen.dart';
 import 'pdf_tools_screen.dart';
+import '../utils/app_localizations.dart'; // for AppLocalizations
 
 class PdfViewerScreen extends StatefulWidget {
   final String filePath;
@@ -154,17 +155,18 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   }
 
   Future<void> _showPasswordDialog() async {
+    final l10n = AppLocalizations.of(context)!;
     final ctrl = TextEditingController();
     final pwd = await AppleDialog.show<String>(
       context: context,
-      title: 'Password Protected',
+      title: l10n.passwordProtected,
       child: TextField(
         controller: ctrl,
         autofocus: true,
         obscureText: true,
         style: const TextStyle(color: Colors.white, fontSize: 15),
         decoration: InputDecoration(
-          hintText: 'Enter password',
+          hintText: l10n.enterPassword,
           hintStyle: const TextStyle(color: Colors.white38),
           filled: true,
           fillColor: DS.bgCard2,
@@ -180,8 +182,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
         onSubmitted: (v) => Navigator.pop(context, v),
       ),
       actions: [
-        AppleDialogAction(label: 'Cancel', onPressed: () => Navigator.pop(context)),
-        AppleDialogAction(label: 'Open', onPressed: () => Navigator.pop(context, ctrl.text)),
+        AppleDialogAction(label: l10n.cancel, onPressed: () => Navigator.pop(context)),
+        AppleDialogAction(label: l10n.open, onPressed: () => Navigator.pop(context, ctrl.text)),
       ],
     );
     if (pwd != null && pwd.isNotEmpty) {
@@ -211,8 +213,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   }
 
   void _toggleReadMode() {
+    final l10n = AppLocalizations.of(context)!;
     setState(() => _readMode = !_readMode);
-    _snack(_readMode ? 'Read Mode — Scroll to navigate' : 'Zoom Mode — Pinch to zoom');
+    _snack(_readMode ? l10n.readModeScroll : l10n.zoomModePinch);
   }
 
   void _zoom(double factor) {
@@ -540,6 +543,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
   Future<void> _save() async {
     if (_isSaving || _docLoading || _doc == null) return;
+    final l10n = AppLocalizations.of(context)!;
 
     final defaultName = p.basenameWithoutExtension(widget.filePath);
     final desiredName = await _askFileName(defaultName: defaultName);
@@ -550,7 +554,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     String? customDir;
     if (!kIsWeb) {
       customDir = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: 'Choose save location',
+        dialogTitle: l10n.chooseSaveLocation,
       );
     }
 
@@ -573,20 +577,20 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
       if (customDir != null && !kIsWeb) {
         final dest = File('$customDir/$safeName');
         await dest.writeAsBytes(bytes);
-        _snack('Saved to ${dest.path}', duration: 4);
+        _snack('${l10n.savedTo} ${dest.path}', duration: 4);
       } else if (kIsWeb) {
         downloadFile(safeName, bytes);
-        _snack('Downloaded $safeName');
+        _snack('$l10n.downloaded $safeName');
       } else {
         final defaultDir = await getApplicationDocumentsDirectory();
         final dest = File('${defaultDir.path}/$safeName');
         await dest.writeAsBytes(bytes);
-        _snack('Saved as $safeName');
+        _snack(l10n.savedAs + ' $safeName');
       }
 
       if (mounted) _showPostActionDialog();
     } catch (e) {
-      if (mounted) _snack('Save failed: $e', err: true, duration: 5);
+      if (mounted) _snack('${l10n.saveFailed}: $e', err: true, duration: 5);
       debugPrint('Save error: $e');
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -595,6 +599,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
 
   Future<void> _share() async {
     if (_isSaving || _docLoading || _doc == null) return;
+    final l10n = AppLocalizations.of(context)!;
 
     final defaultName = p.basenameWithoutExtension(widget.filePath);
     final desiredName = await _askFileName(defaultName: defaultName);
@@ -626,20 +631,21 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
         if (mounted) _showPostActionDialog();
       }
     } catch (e) {
-      if (mounted) _snack('Share failed: $e', err: true);
+      if (mounted) _snack('${l10n.shareFailed}: $e', err: true);
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
 
   Future<void> _print() async {
+    final l10n = AppLocalizations.of(context)!;
     try {
       final path = await _buildPdf();
       if (path == null) return;
       final bytes = await PlatformFileService.readBytes(path) ?? Uint8List(0);
       await Printing.layoutPdf(onLayout: (_) async => bytes);
     } catch (e) {
-      if (mounted) _snack('Print error: $e', err: true);
+      if (mounted) _snack('${l10n.printError}: $e', err: true);
     }
   }
 
@@ -666,14 +672,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   }
 
   void _showPostActionDialog([String? message]) {
+    final l10n = AppLocalizations.of(context)!;
     AppleDialog.show(
       context: context,
-      title: 'Done',
-      content: message ?? 'Do you want to open another document?',
+      title: l10n.done,
+      content: message ?? l10n.openAnotherDocument,
       actions: [
-        AppleDialogAction(label: 'No', onPressed: () => Navigator.pop(context)),
+        AppleDialogAction(label: l10n.no, onPressed: () => Navigator.pop(context)),
         AppleDialogAction(
-          label: 'Yes',
+          label: l10n.yes,
           onPressed: () {
             Navigator.pop(context);
             Navigator.of(context).popUntil((route) => route.isFirst);
@@ -684,16 +691,17 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   }
 
   Future<String?> _askFileName({String? defaultName}) async {
+    final l10n = AppLocalizations.of(context)!;
     final controller = TextEditingController(text: defaultName ?? 'document');
     return AppleDialog.show<String>(
       context: context,
-      title: 'Save as',
+      title: l10n.saveAs,
       child: TextField(
         controller: controller,
         autofocus: true,
         style: const TextStyle(color: Colors.white, fontSize: 15),
         decoration: InputDecoration(
-          hintText: 'Enter file name',
+          hintText: l10n.enterFileName,
           filled: true,
           fillColor: DS.bgCard2,
           border: OutlineInputBorder(
@@ -704,8 +712,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
         onSubmitted: (v) => Navigator.pop(context, v.trim()),
       ),
       actions: [
-        AppleDialogAction(label: 'Cancel', onPressed: () => Navigator.pop(context)),
-        AppleDialogAction(label: 'Save', onPressed: () => Navigator.pop(context, controller.text.trim())),
+        AppleDialogAction(label: l10n.cancel, onPressed: () => Navigator.pop(context)),
+        AppleDialogAction(label: l10n.save, onPressed: () => Navigator.pop(context, controller.text.trim())),
       ],
     );
   }
@@ -841,27 +849,31 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
     );
   }
 
-  Widget _errorView() => Center(
-    child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const Icon(Icons.error_outline_rounded, color: DS.red, size: 44),
-      const SizedBox(height: 10),
-      Text('Cannot open file', style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
-      const SizedBox(height: 6),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Text(_docError!, style: DS.caption(), textAlign: TextAlign.center),
-      ),
-      const SizedBox(height: 16),
-      FilledButton.icon(
-        onPressed: () => _openDoc(),
-        icon: const Icon(Icons.refresh_rounded, size: 16),
-        label: const Text('Retry'),
-        style: FilledButton.styleFrom(backgroundColor: DS.indigo),
-      ),
-    ]),
-  );
+  Widget _errorView() {
+    final l10n = AppLocalizations.of(context)!;
+    return Center(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.error_outline_rounded, color: DS.red, size: 44),
+        const SizedBox(height: 10),
+        Text(l10n.cannotOpenFile, style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(_docError!, style: DS.caption(), textAlign: TextAlign.center),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: () => _openDoc(),
+          icon: const Icon(Icons.refresh_rounded, size: 16),
+          label: Text(l10n.retry),
+          style: FilledButton.styleFrom(backgroundColor: DS.indigo),
+        ),
+      ]),
+    );
+  }
 
   PreferredSizeWidget _topBar() {
+    final l10n = AppLocalizations.of(context)!;
     return PreferredSize(
       preferredSize: const Size.fromHeight(52),
       child: BackdropFilter(
@@ -891,7 +903,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                           maxLines: 1,
                         ),
                         Text(
-                          'p.$_visPage / $_pageCount',
+                          '${l10n.page}$_visPage / $_pageCount',
                           style: DS.caption().copyWith(fontSize: 10, color: Colors.white70),
                         ),
                       ],
@@ -900,7 +912,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                   const SizedBox(width: 8),
                   IconButton(
                     icon: Icon(_readMode ? Icons.menu_book_rounded : Icons.zoom_in_rounded, color: Colors.white54, size: 20),
-                    tooltip: _readMode ? 'Read Mode' : 'Zoom Mode',
+                    tooltip: _readMode ? l10n.readMode : l10n.zoomMode,
                     onPressed: _toggleReadMode,
                   ),
                   if (_docLoading)
@@ -916,11 +928,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                   else
                     IconButton(
                       icon: const Icon(Icons.save_rounded, color: DS.indigo, size: 22),
-                      tooltip: kIsWeb ? 'Download' : 'Save',
+                      tooltip: kIsWeb ? l10n.download : l10n.save,
                       onPressed: _save,
                     ),
                   IconButton(
                     icon: Icon(kIsWeb ? Icons.download_rounded : Icons.ios_share_rounded, color: DS.indigo, size: 20),
+                    tooltip: kIsWeb ? l10n.export : l10n.share,
                     onPressed: _share,
                   ),
                 ],
@@ -933,6 +946,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   }
 
   Widget _floatingZoomButtons() {
+    final l10n = AppLocalizations.of(context)!;
     if (_readMode || _annotating) return const SizedBox();
     return Positioned(
       top: 70,
@@ -940,11 +954,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _zoomFabButton(Icons.zoom_in, 'Zoom in', _zoomIn),
+          _zoomFabButton(Icons.zoom_in, l10n.zoomIn, _zoomIn),
           const SizedBox(height: 8),
-          _zoomFabButton(Icons.zoom_out, 'Zoom out', _zoomOut),
+          _zoomFabButton(Icons.zoom_out, l10n.zoomOut, _zoomOut),
           const SizedBox(height: 8),
-          _zoomFabButton(Icons.aspect_ratio, 'Reset zoom', _resetZoom),
+          _zoomFabButton(Icons.aspect_ratio, l10n.resetZoom, _resetZoom),
         ],
       ),
     );
@@ -975,6 +989,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
   Widget build(BuildContext context) {
     DS.setStatusBar();
     final isWideWeb = kIsWeb && MediaQuery.of(context).size.width > 700;
+    final l10n = AppLocalizations.of(context)!;
 
     return Scaffold(
       backgroundColor: _darkMode ? Colors.black : const Color(0xFFF0F0F0),
@@ -1008,10 +1023,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen>
                     children: [
                       const Icon(Icons.touch_app_rounded, color: DS.indigo, size: 14),
                       const SizedBox(width: 6),
-                      Expanded(child: Text('Tap page to place ${_initialsMode ? "initials" : "signature"}', style: TextStyle(color: DS.indigo, fontSize: 12))),
+                      Expanded(
+                        child: Text(
+                          _initialsMode ? l10n.tapToPlaceInitials : l10n.tapToPlaceSignature,
+                          style: TextStyle(color: DS.indigo, fontSize: 12),
+                        ),
+                      ),
                       TextButton(
                         onPressed: () => setState(() { _pendingSig = null; _tool = AnnotationTool.view; }),
-                        child: const Text('Cancel', style: TextStyle(fontSize: 11)),
+                        child: Text(l10n.cancel, style: const TextStyle(fontSize: 11)),
                       ),
                     ],
                   ),
@@ -1153,59 +1173,71 @@ class _BottomBar extends StatelessWidget {
 
   const _BottomBar({required this.current, required this.currentTool, required this.isSaving, required this.docLoading, required this.darkMode, required this.showThumbs, required this.inkColor, required this.onTabChange, required this.onToolChange, required this.onColorChange, required this.onUndo, required this.onSave, required this.onShare, required this.onPrint, required this.onSearch, required this.onDark, required this.onThumbs, required this.onProfile, required this.onSlots, required this.onClauses, required this.onSummary, required this.onCompare, required this.onAudit, required this.onTools});
 
-  @override Widget build(BuildContext context) => Container(
-    decoration: const BoxDecoration(color: DS.bgCard, border: Border(top: BorderSide(color: DS.separator, width: 0.5))),
-    child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
-      Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6), child: Wrap(alignment: WrapAlignment.start, crossAxisAlignment: WrapCrossAlignment.center, spacing: 2, runSpacing: 2, children: _toolsForTab())),
-      Container(decoration: const BoxDecoration(border: Border(top: BorderSide(color: DS.separator, width: 0.3))), child: Row(children: [_tab(_TabMode.edit, 'Edit', Icons.edit_rounded), _tab(_TabMode.annotate, 'Annotate', Icons.rate_review_rounded), _tab(_TabMode.fillSign, 'Fill & Sign', Icons.draw_rounded), _tab(_TabMode.all, 'All', Icons.apps_rounded)])),
-    ])));
+  @override Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Container(
+      decoration: const BoxDecoration(color: DS.bgCard, border: Border(top: BorderSide(color: DS.separator, width: 0.5))),
+      child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6), child: Wrap(alignment: WrapAlignment.start, crossAxisAlignment: WrapCrossAlignment.center, spacing: 2, runSpacing: 2, children: _toolsForTab(l10n))),
+        Container(decoration: const BoxDecoration(border: Border(top: BorderSide(color: DS.separator, width: 0.3))), child: Row(children: [
+          _tab(l10n.tabEdit, Icons.edit_rounded, _TabMode.edit),
+          _tab(l10n.tabAnnotate, Icons.rate_review_rounded, _TabMode.annotate),
+          _tab(l10n.tabFillSign, Icons.draw_rounded, _TabMode.fillSign),
+          _tab(l10n.tabAll, Icons.apps_rounded, _TabMode.all)
+        ])),
+      ])));
+  }
 
-  List<Widget> _toolsForTab() {
+  List<Widget> _toolsForTab(AppLocalizations l10n) {
     switch (current) {
-      case _TabMode.edit: return [_tb(Icons.text_fields_rounded, 'Text', AnnotationTool.textStamp, DS.indigo), _tb(Icons.sticky_note_2_rounded, 'Note', AnnotationTool.stickyNote, DS.orange), _ab(Icons.undo_rounded, 'Undo', onUndo)];
+      case _TabMode.edit: return [
+        _tb(Icons.text_fields_rounded, l10n.text, AnnotationTool.textStamp, DS.indigo),
+        _tb(Icons.sticky_note_2_rounded, l10n.note, AnnotationTool.stickyNote, DS.orange),
+        _ab(Icons.undo_rounded, l10n.undo, onUndo)
+      ];
       case _TabMode.annotate: return [
-        _tb(Icons.highlight_rounded, 'Highlight', AnnotationTool.highlight, const Color(0xFFFFD600)),
-        _tb(Icons.format_underline_rounded, 'Underline', AnnotationTool.underline, const Color(0xFF38BDF8)),
-        _tb(Icons.strikethrough_s_rounded, 'Strike', AnnotationTool.strikethrough, const Color(0xFFF87171)),
-        _tb(Icons.brush_rounded, 'Draw', AnnotationTool.ink, inkColor),
-        if (currentTool == AnnotationTool.ink) _colorPalette(),
-        _tb(Icons.sticky_note_2_rounded, 'Note', AnnotationTool.stickyNote, const Color(0xFFFB923C)),
-        _tb(Icons.hide_source_rounded, 'Redact', AnnotationTool.redaction, DS.red),
-        _tb(Icons.bookmark_add_rounded, 'Clause', AnnotationTool.clauseBookmark, DS.green),
-        _ab(Icons.undo_rounded, 'Undo', onUndo),
-        _ab(Icons.build_rounded, 'Tools', onTools, color: DS.cyan),
+        _tb(Icons.highlight_rounded, l10n.highlight, AnnotationTool.highlight, const Color(0xFFFFD600)),
+        _tb(Icons.format_underline_rounded, l10n.underline, AnnotationTool.underline, const Color(0xFF38BDF8)),
+        _tb(Icons.strikethrough_s_rounded, l10n.strike, AnnotationTool.strikethrough, const Color(0xFFF87171)),
+        _tb(Icons.brush_rounded, l10n.draw, AnnotationTool.ink, inkColor),
+        if (currentTool == AnnotationTool.ink) _colorPalette(l10n),
+        _tb(Icons.sticky_note_2_rounded, l10n.note, AnnotationTool.stickyNote, const Color(0xFFFB923C)),
+        _tb(Icons.hide_source_rounded, l10n.redact, AnnotationTool.redaction, DS.red),
+        _tb(Icons.bookmark_add_rounded, l10n.clause, AnnotationTool.clauseBookmark, DS.green),
+        _ab(Icons.undo_rounded, l10n.undo, onUndo),
+        _ab(Icons.build_rounded, l10n.tools, onTools, color: DS.cyan),
       ];
       case _TabMode.fillSign: return [
-        _tb(Icons.draw_rounded, 'Sign', AnnotationTool.signature, DS.purple),
-        _tb(Icons.fingerprint_rounded, 'Initials', AnnotationTool.initials, const Color(0xFFA78BFA)),
-        _tb(Icons.text_fields_rounded, 'Text', AnnotationTool.textStamp, DS.indigo),
-        _ab(Icons.people_rounded, 'Slots', onSlots),
-        _ab(Icons.verified_rounded, 'Audit', onAudit),
-        _ab(Icons.person_rounded, 'Profile', onProfile),
+        _tb(Icons.draw_rounded, l10n.sign, AnnotationTool.signature, DS.purple),
+        _tb(Icons.fingerprint_rounded, l10n.initials, AnnotationTool.initials, const Color(0xFFA78BFA)),
+        _tb(Icons.text_fields_rounded, l10n.text, AnnotationTool.textStamp, DS.indigo),
+        _ab(Icons.people_rounded, l10n.slots, onSlots),
+        _ab(Icons.verified_rounded, l10n.audit, onAudit),
+        _ab(Icons.person_rounded, l10n.profile, onProfile),
         if (docLoading)
-          _ab(Icons.save_rounded, kIsWeb ? 'Download (loading...)' : 'Save (loading...)', () {}, color: Colors.white24)
+          _ab(Icons.save_rounded, kIsWeb ? l10n.download : l10n.save, () {}, color: Colors.white24)
         else if (isSaving)
           const Padding(padding: EdgeInsets.symmetric(horizontal: 10), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: DS.indigo)))
         else
-          _ab(Icons.save_rounded, kIsWeb ? 'Download' : 'Save', onSave, color: DS.indigo),
-        _ab(kIsWeb ? Icons.download_rounded : Icons.ios_share_rounded, kIsWeb ? 'Export' : 'Share', onShare, color: DS.indigo),
+          _ab(Icons.save_rounded, kIsWeb ? l10n.download : l10n.save, onSave, color: DS.indigo),
+        _ab(kIsWeb ? Icons.download_rounded : Icons.ios_share_rounded, kIsWeb ? l10n.export : l10n.share, onShare, color: DS.indigo),
       ];
       case _TabMode.all: return [
-        _tb(Icons.highlight_rounded, 'Highlight', AnnotationTool.highlight, const Color(0xFFFFD600)),
-        _tb(Icons.brush_rounded, 'Draw', AnnotationTool.ink, inkColor),
-        _tb(Icons.draw_rounded, 'Sign', AnnotationTool.signature, DS.purple),
-        _tb(Icons.text_fields_rounded, 'Text', AnnotationTool.textStamp, DS.indigo),
-        _tb(Icons.hide_source_rounded, 'Redact', AnnotationTool.redaction, DS.red),
-        _ab(darkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded, 'Dark', onDark, color: darkMode ? Colors.amber : Colors.white38),
-        _ab(showThumbs ? Icons.grid_on_rounded : Icons.grid_off_rounded, 'Pages', onThumbs, color: showThumbs ? DS.indigo : Colors.white38),
-        _ab(Icons.compare_rounded, 'Compare', onCompare),
-        _ab(Icons.print_rounded, 'Print', onPrint),
-        _ab(Icons.undo_rounded, 'Undo', onUndo),
+        _tb(Icons.highlight_rounded, l10n.highlight, AnnotationTool.highlight, const Color(0xFFFFD600)),
+        _tb(Icons.brush_rounded, l10n.draw, AnnotationTool.ink, inkColor),
+        _tb(Icons.draw_rounded, l10n.sign, AnnotationTool.signature, DS.purple),
+        _tb(Icons.text_fields_rounded, l10n.text, AnnotationTool.textStamp, DS.indigo),
+        _tb(Icons.hide_source_rounded, l10n.redact, AnnotationTool.redaction, DS.red),
+        _ab(darkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded, l10n.darkMode, onDark, color: darkMode ? Colors.amber : Colors.white38),
+        _ab(showThumbs ? Icons.grid_on_rounded : Icons.grid_off_rounded, l10n.thumbnails, onThumbs, color: showThumbs ? DS.indigo : Colors.white38),
+        _ab(Icons.compare_rounded, l10n.compare, onCompare),
+        _ab(Icons.print_rounded, l10n.print, onPrint),
+        _ab(Icons.undo_rounded, l10n.undo, onUndo),
       ];
     }
   }
 
-  Widget _colorPalette() {
+  Widget _colorPalette(AppLocalizations l10n) {
     const colors = [Colors.black, Colors.red, Colors.blue, Colors.green, Colors.orange, Colors.purple, Color(0xFF6366F1), Colors.white];
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Container(width: 1, height: 24, color: Colors.white12, margin: const EdgeInsets.symmetric(horizontal: 4)),
@@ -1224,7 +1256,7 @@ class _BottomBar extends StatelessWidget {
     ]);
   }
 
-  Widget _tab(_TabMode mode, String label, IconData icon) {
+  Widget _tab(String label, IconData icon, _TabMode mode) {
     final active = current == mode;
     return Expanded(child: ScaleTap(
       onTap: () => onTabChange(mode),

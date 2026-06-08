@@ -18,6 +18,7 @@ class AnnotationPainter extends CustomPainter {
   final Rect?             draftRect;
   final AnnotationType?   draftType;
   final Color             draftColor;
+  final String redactedLabel;
 
   const AnnotationPainter({
     required this.rects,
@@ -30,6 +31,8 @@ class AnnotationPainter extends CustomPainter {
     this.draftRect,
     this.draftType,
     this.draftColor = Colors.yellow,
+    required this.redactedLabel,  // ADD THIS
+
   });
 
   @override
@@ -50,20 +53,20 @@ class AnnotationPainter extends CustomPainter {
 
   // ── Redactions ────────────────────────────────────────────────────────────
 
-  void _drawRedactions(Canvas canvas, double w, double h) {
-    for (final r in redactions) {
-      final rect = _dn(r.normRect, w, h);
-      canvas.drawRect(rect, Paint()..color = Colors.black);
-      // White REDACTED label
-      (TextPainter(
-        text: const TextSpan(text: 'REDACTED',
-            style: TextStyle(color: Colors.white54, fontSize: 10,
-                fontWeight: FontWeight.bold, letterSpacing: 1)),
-        textDirection: TextDirection.ltr,
-      )..layout()).paint(canvas,
-          Offset(rect.left + 4, rect.top + (rect.height - 12) / 2));
+    void _drawRedactions(Canvas canvas, double w, double h) {
+      for (final r in redactions) {
+        final rect = _dn(r.normRect, w, h);
+        canvas.drawRect(rect, Paint()..color = Colors.black);
+        // Use redactedLabel instead of hardcoded 'REDACTED'
+        (TextPainter(
+          text: TextSpan(text: redactedLabel,
+              style: const TextStyle(color: Colors.white54, fontSize: 10,
+                  fontWeight: FontWeight.bold, letterSpacing: 1)),
+          textDirection: TextDirection.ltr,
+        )..layout()).paint(canvas,
+            Offset(rect.left + 4, rect.top + (rect.height - 12) / 2));
+      }
     }
-  }
 
   // ── Rect annotations ──────────────────────────────────────────────────────
 
