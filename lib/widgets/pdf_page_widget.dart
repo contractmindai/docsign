@@ -101,8 +101,6 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
   bool _failed = false;
   int _retries = 0;
 
-  // Raw RGBA pixel data from the last render. Used to feed OCR when the
-  // page has no extractable text layer (scanned / rasterized PDFs).
   Uint8List? _rawPagePixels;
   int _rawPixelWidth = 0;
   int _rawPixelHeight = 0;
@@ -259,9 +257,6 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
     }
   }
 
-  /// Returns the last rendered page's raw pixels + dimensions, or null if
-  /// the page hasn't finished rendering yet. Consumed by the text-runs
-  /// overlay as an OCR source when the page has no text layer.
   OcrPageSource? _ocrSource() {
     final px = _rawPagePixels;
     if (px == null || _rawPixelWidth <= 0 || _rawPixelHeight <= 0) return null;
@@ -673,9 +668,21 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
     );
   }
 
+  /// Preview of a text edit annotation.
+  ///
+  /// The stored `textEdit.fontSize` is in **PDF points**. Flutter's
+  /// `TextStyle.fontSize` is in **logical pixels**. We convert so the
+  /// on-screen preview matches what the saved PDF actually looks like
+  /// at the current display width.
+  ///
+  /// The save path (`PdfOperatorBuilder._textEditOps`) reads
+  /// `textEdit.fontSize` directly as points, so this preview change has
+  /// no effect on what gets written to the output PDF.
   Widget _buildTextEdit(TextEditAnnotation textEdit, Size pageSize) {
+    final double ptToPx = pageSize.width / _pageWidthPt;
+
     final style = TextStyle(
-      fontSize: textEdit.fontSize,
+      fontSize: textEdit.fontSize * ptToPx,
       color: textEdit.color,
       fontWeight: textEdit.isBold ? FontWeight.bold : FontWeight.normal,
       fontStyle: textEdit.isItalic ? FontStyle.italic : FontStyle.normal,
@@ -685,20 +692,24 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
     if (textEdit.isReplacement) {
       final r = textEdit.originalNormRect!;
       final coverColor = Color(textEdit.coverColorValue);
+
       return Positioned(
         left: r.left * pageSize.width,
         top: r.top * pageSize.height,
         width: r.width * pageSize.width,
         height: r.height * pageSize.height,
         child: Stack(
+          clipBehavior: Clip.none,
           children: [
-            Container(color: coverColor),
+            Positioned.fill(child: Container(color: coverColor)),
             Align(
               alignment: Alignment.centerLeft,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(textEdit.text, style: style, maxLines: 1),
+              child: Text(
+                textEdit.text,
+                style: style,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.visible,
               ),
             ),
           ],

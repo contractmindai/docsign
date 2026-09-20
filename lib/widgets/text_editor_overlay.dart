@@ -14,6 +14,11 @@ class TextEditorOverlay extends StatefulWidget {
   /// to preserve) should leave this false.
   final bool startPlain;
 
+  /// Font size the editor opens with. Defaults to 14 when the caller
+  /// doesn't supply the run's real size. This is a starting value only —
+  /// whatever the user leaves in the toolbar is what gets saved.
+  final double initialFontSize;
+
   /// Called with (text, style, formattingChanged). `formattingChanged` is
   /// true only if the user opened/touched the formatting controls — callers
   /// use this to decide between an in-place edit that preserves the
@@ -26,6 +31,7 @@ class TextEditorOverlay extends StatefulWidget {
     super.key,
     this.initialText,
     this.startPlain = false,
+    this.initialFontSize = 14,
     required this.onSave,
     required this.onCancel,
   });
@@ -38,7 +44,10 @@ class _TextEditorOverlayState extends State<TextEditorOverlay> {
   late TextEditingController _controller;
   late FocusNode _focusNode;
 
-  double _fontSize = 14;
+  /// Initialised from [TextEditorOverlay.initialFontSize]. Not a const so
+  /// a caller can seed it with the size of the run being edited.
+  late double _fontSize = widget.initialFontSize;
+
   Color _textColor = Colors.black;
   bool _isBold = false;
   bool _isItalic = false;
@@ -48,7 +57,9 @@ class _TextEditorOverlayState extends State<TextEditorOverlay> {
   bool _formattingTouched = false;
 
   static const _fonts = ['Inter', 'Times New Roman', 'Courier', 'Georgia'];
-  static const _fontSizes = [10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 48];
+  static const _fontSizes = [
+    8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 56, 64
+  ];
 
   @override
   void initState() {
@@ -157,11 +168,11 @@ class _TextEditorOverlayState extends State<TextEditorOverlay> {
                     const Icon(Icons.auto_fix_high_rounded,
                         size: 14, color: Colors.white38),
                     const SizedBox(width: 6),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'Keeps the original look',
-                        style:
-                            TextStyle(color: Colors.white38, fontSize: 11),
+                        'Keeps the original look · ${_fontSize.toInt()}pt',
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 11),
                       ),
                     ),
                     GestureDetector(
@@ -201,7 +212,8 @@ class _TextEditorOverlayState extends State<TextEditorOverlay> {
                 ),
                 onSubmitted: (text) {
                   if (text.trim().isNotEmpty) {
-                    widget.onSave(text.trim(), _currentStyle, _formattingTouched);
+                    widget.onSave(
+                        text.trim(), _currentStyle, _formattingTouched);
                   }
                 },
               ),
@@ -286,6 +298,15 @@ class _TextEditorOverlayState extends State<TextEditorOverlay> {
   }
 
   Widget _buildFontSizeSelector() {
+    // If the run's real size isn't one of the presets, insert it in sorted
+    // order so the dropdown reflects the current value.
+    final sizes = [..._fontSizes];
+    final current = _fontSize.round();
+    if (!sizes.contains(current)) {
+      sizes.add(current);
+      sizes.sort();
+    }
+
     return PopupMenuButton<double>(
       tooltip: 'Font size',
       offset: const Offset(0, 40),
@@ -313,11 +334,12 @@ class _TextEditorOverlayState extends State<TextEditorOverlay> {
         _fontSize = size;
         _formattingTouched = true;
       }),
-      itemBuilder: (_) => _fontSizes
+      itemBuilder: (_) => sizes
           .map((s) => PopupMenuItem(
                 value: s.toDouble(),
                 child: Text('$s pt',
-                    style: TextStyle(fontSize: s.toDouble())),
+                    style: TextStyle(
+                        fontSize: s.toDouble().clamp(10, 20).toDouble())),
               ))
           .toList(),
     );

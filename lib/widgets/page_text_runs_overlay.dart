@@ -286,7 +286,7 @@ class _PageTextRunsOverlayState extends State<PageTextRunsOverlay> {
           baselineY: o.y,
           endX: o.x + o.width,
           fontRef: '',
-          fontSize: (o.height * 0.75).clamp(6.0, 72.0),
+          fontSize: (o.height * 1.0).clamp(6.0, 72.0), 
           widthEm: 0,
           originalHz: 100,
           charSpacing: 0,
