@@ -43,7 +43,7 @@ android {
         applicationId = "com.contractmind.docsign"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = 8
+        versionCode = 12
         versionName = "2.0.1"
     }
 
@@ -65,4 +65,9 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
         jvmTarget.set(JvmTarget.JVM_17)
     }
 }
-
+// Force the deep link task to wait until the manifest is generated
+afterEvaluate {
+    tasks.findByName("outputReleaseAppLinkSettings")?.let { task ->
+        task.mustRunAfter(tasks.named("processReleaseMainManifest"))
+    }
+}

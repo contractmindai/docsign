@@ -21,18 +21,18 @@ void main() {
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
   ));
-  runApp(const DocSignApp());
+  runApp(const DocScanSignApp());   // Changed
 }
 
-class DocSignApp extends StatefulWidget {
-  const DocSignApp({super.key});
+class DocScanSignApp extends StatefulWidget {   // Changed
+  const DocScanSignApp({super.key});   // Changed
   @override
-  State<DocSignApp> createState() => _DocSignAppState();
+  State<DocScanSignApp> createState() => _DocScanSignAppState();   // Changed
 }
 
-class _DocSignAppState extends State<DocSignApp> {
+class _DocScanSignAppState extends State<DocScanSignApp> {   // Changed
   final _nav = GlobalKey<NavigatorState>();
-  static const _channel = MethodChannel('docsign/file_open');
+  static const _channel = MethodChannel('docsign/file_open');   // Kept as is
   final _pendingFiles = <String>[];
 
   @override
@@ -95,10 +95,9 @@ class _DocSignAppState extends State<DocSignApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: _nav,
-      title: 'DocSign',
+      title: 'DocScanSign',   // Changed
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),
-      // ========== LOCALIZATION SUPPORT ==========
       localizationsDelegates: const [
         AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
@@ -109,7 +108,6 @@ class _DocSignAppState extends State<DocSignApp> {
         Locale('en'), Locale('es'), Locale('hi'), Locale('te'), Locale('fr'),
       ],
       localeResolutionCallback: (deviceLocale, supported) {
-        // Fallback to English if device locale not supported
         if (deviceLocale != null && supported.any((l) => l.languageCode == deviceLocale.languageCode)) {
           return deviceLocale;
         }
@@ -128,8 +126,6 @@ class _DocSignAppState extends State<DocSignApp> {
         brightness: Brightness.dark,
       ),
       scaffoldBackgroundColor: const Color(0xFF09090B),
-      
-      // Apple‑style dialog theme
       dialogTheme: DialogThemeData(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -138,14 +134,10 @@ class _DocSignAppState extends State<DocSignApp> {
         ),
       ),
       dialogBackgroundColor: Colors.transparent,
-      
-      // Crisp typography
       textTheme: GoogleFonts.interTextTheme().apply(
         bodyColor: Colors.white,
         displayColor: Colors.white,
       ),
-      
-      // AppBar – semi‑transparent
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.black.withOpacity(0.7),
         elevation: 0,

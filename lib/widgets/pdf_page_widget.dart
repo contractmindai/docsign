@@ -7,16 +7,20 @@ import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import '../models/annotation.dart';
+import '../services/pdf_ocr_service.dart';
 import 'annotation_painter.dart';
 import 'ds.dart';
+import 'page_text_runs_overlay.dart';
 import 'text_editor_overlay.dart';
-import '../utils/app_localizations.dart'; // for AppLocalizations
+import '../utils/app_localizations.dart';
 
 final _renderSem = _Semaphore(1);
 
 class PdfPageWidget extends StatefulWidget {
   final PdfDocument document;
   final int pageIndex;
+  final int pageCount;
+  final int revision;
   final double displayWidth;
   final bool darkMode;
   final List<RectAnnotation> rects;
@@ -32,6 +36,7 @@ class PdfPageWidget extends StatefulWidget {
   final double inkStrokeWidth;
   final Uint8List? pendingSignature;
   final bool isInitialMode;
+  final Uint8List? currentSourceBytes;
 
   final void Function(RectAnnotation) onRectAdded;
   final void Function(InkStroke) onInkStrokeAdded;
@@ -46,11 +51,14 @@ class PdfPageWidget extends StatefulWidget {
   final void Function(ClauseBookmark) onBookmarkAdded;
   final void Function(TextEditAnnotation) onTextEditAdded;
   final void Function(Rect) onHighlightTapped;
+  final void Function(Uint8List newSourceBytes)? onSourceBytesUpdated;
 
   const PdfPageWidget({
     super.key,
     required this.document,
     required this.pageIndex,
+    required this.pageCount,
+    required this.revision,
     required this.displayWidth,
     required this.darkMode,
     required this.rects,
@@ -79,6 +87,8 @@ class PdfPageWidget extends StatefulWidget {
     required this.onBookmarkAdded,
     required this.onTextEditAdded,
     required this.onHighlightTapped,
+    this.currentSourceBytes,
+    this.onSourceBytesUpdated,
   });
 
   @override
@@ -90,6 +100,12 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
   bool _loading = true;
   bool _failed = false;
   int _retries = 0;
+
+  // Raw RGBA pixel data from the last render. Used to feed OCR when the
+  // page has no extractable text layer (scanned / rasterized PDFs).
+  Uint8List? _rawPagePixels;
+  int _rawPixelWidth = 0;
+  int _rawPixelHeight = 0;
 
   static const _maxRetries = 3;
   static const _maxRenderSize = 2000.0;
@@ -109,6 +125,22 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
     }
   }
 
+  double get _pageWidthPt {
+    try {
+      return widget.document.pages[widget.pageIndex].width;
+    } catch (_) {
+      return 595.28;
+    }
+  }
+
+  double get _pageHeightPt {
+    try {
+      return widget.document.pages[widget.pageIndex].height;
+    } catch (_) {
+      return 841.89;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -119,7 +151,9 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
   @override
   void didUpdateWidget(PdfPageWidget old) {
     super.didUpdateWidget(old);
-    if ((old.displayWidth - widget.displayWidth).abs() > 40.0) {
+    final documentChanged = !identical(old.document, widget.document);
+    if (documentChanged ||
+        (old.displayWidth - widget.displayWidth).abs() > 40.0) {
       _retries = 0;
       _renderPage();
     }
@@ -193,6 +227,9 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
         _pageImage?.dispose();
         setState(() {
           _pageImage = uiImage;
+          _rawPagePixels = convertedPixels;
+          _rawPixelWidth = pdfImage.width;
+          _rawPixelHeight = pdfImage.height;
           _loading = false;
           _failed = false;
           _retries = 0;
@@ -219,6 +256,53 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
       }
     } finally {
       if (!released) _renderSem.release();
+    }
+  }
+
+  /// Returns the last rendered page's raw pixels + dimensions, or null if
+  /// the page hasn't finished rendering yet. Consumed by the text-runs
+  /// overlay as an OCR source when the page has no text layer.
+  OcrPageSource? _ocrSource() {
+    final px = _rawPagePixels;
+    if (px == null || _rawPixelWidth <= 0 || _rawPixelHeight <= 0) return null;
+    return OcrPageSource(
+      pixels: px,
+      width: _rawPixelWidth,
+      height: _rawPixelHeight,
+    );
+  }
+
+  Future<int> _sampleBackground(Rect normRect) async {
+    final img = _pageImage;
+    if (img == null) return 0xFFFFFFFF;
+
+    try {
+      final sampleX =
+          (normRect.left * img.width).round().clamp(0, img.width - 1);
+      final sampleY =
+          ((normRect.top * img.height).round() - 2).clamp(0, img.height - 1);
+
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawImageRect(
+        img,
+        Rect.fromLTWH(sampleX.toDouble(), sampleY.toDouble(), 1.0, 1.0),
+        const Rect.fromLTWH(0, 0, 1, 1),
+        Paint(),
+      );
+      final picture = recorder.endRecording();
+      final tiny = await picture.toImage(1, 1);
+      final data = await tiny.toByteData(format: ui.ImageByteFormat.rawRgba);
+      tiny.dispose();
+      picture.dispose();
+
+      if (data == null || data.lengthInBytes < 4) return 0xFFFFFFFF;
+      final r = data.getUint8(0);
+      final g = data.getUint8(1);
+      final b = data.getUint8(2);
+      return 0xFF000000 | (r << 16) | (g << 8) | b;
+    } catch (_) {
+      return 0xFFFFFFFF;
     }
   }
 
@@ -252,11 +336,14 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
   bool get _annotating =>
       widget.tool != AnnotationTool.view || widget.pendingSignature != null;
 
+  bool get _isTextEditMode => widget.tool == AnnotationTool.textEdit;
+
   void _onTap(TapDownDetails d, Size size) {
     final l10n = AppLocalizations.of(context)!;
     final norm = _norm(d.localPosition, size);
 
-    // Sticky notes check
+    if (_isTextEditMode) return;
+
     for (final note in widget.notes) {
       final nx = note.normPosition.dx * size.width;
       final ny = note.normPosition.dy * size.height;
@@ -266,7 +353,6 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
       }
     }
 
-    // Zoom to highlight
     for (final r in widget.rects) {
       if (r.type != AnnotationType.highlight) continue;
       final rect = _dn(r.normRect, size.width, size.height);
@@ -276,7 +362,6 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
       }
     }
 
-    // Annotation tools
     if (_annotating) {
       if (widget.tool == AnnotationTool.textStamp) {
         _showTextEditor(context, norm);
@@ -316,7 +401,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
         backgroundColor: Colors.transparent,
         contentPadding: EdgeInsets.zero,
         content: TextEditorOverlay(
-          onSave: (text, style) {
+          onSave: (text, style, formattingChanged) {
             widget.onTextEditAdded(
               TextEditAnnotation(
                 id: UniqueKey().toString(),
@@ -345,7 +430,8 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
       builder: (_) => AlertDialog(
         backgroundColor: DS.bgCard,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(l10n.addNoteTitle, style: const TextStyle(color: Colors.white)),
+        title: Text(l10n.addNoteTitle,
+            style: const TextStyle(color: Colors.white)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -365,7 +451,8 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text(l10n.cancel, style: const TextStyle(color: Colors.white38)),
+            child: Text(l10n.cancel,
+                style: const TextStyle(color: Colors.white38)),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, ctrl.text),
@@ -389,6 +476,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
   }
 
   void _onPanStart(DragStartDetails d, Size size) {
+    if (_isTextEditMode) return;
     if (widget.tool == AnnotationTool.ink) {
       setState(() {
         _strokePoints
@@ -404,6 +492,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
   }
 
   void _onPanUpdate(DragUpdateDetails d, Size size) {
+    if (_isTextEditMode) return;
     if (widget.tool == AnnotationTool.ink) {
       setState(() => _strokePoints.add(_norm(d.localPosition, size)));
     } else if (_isRectTool) {
@@ -412,6 +501,7 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
   }
 
   void _onPanEnd(DragEndDetails _, Size size) {
+    if (_isTextEditMode) return;
     if (widget.tool == AnnotationTool.ink && _strokePoints.length >= 2) {
       widget.onInkStrokeAdded(
         InkStroke(
@@ -472,36 +562,54 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
       'Indemnification',
       'Governing Law',
     ];
-    const colors = [DS.indigo, DS.green, DS.orange, DS.red, Color(0xFF3B82F6), DS.purple];
+    const colors = [
+      DS.indigo,
+      DS.green,
+      DS.orange,
+      DS.red,
+      Color(0xFF3B82F6),
+      DS.purple
+    ];
     String sel = labels.first;
     await showDialog<void>(
       context: ctx,
       builder: (_) => StatefulBuilder(
         builder: (c2, ss) => AlertDialog(
           backgroundColor: DS.bgCard,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(l10n.clauseLabelTitle, style: const TextStyle(color: Colors.white)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(l10n.clauseLabelTitle,
+              style: const TextStyle(color: Colors.white)),
           content: Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: labels.map((lbl) => GestureDetector(
-              onTap: () => ss(() => sel = lbl),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 140),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: sel == lbl ? DS.indigo : Colors.white10,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: sel == lbl ? DS.indigo : Colors.white24),
-                ),
-                child: Text(lbl, style: const TextStyle(color: Colors.white, fontSize: 12)),
-              ),
-            )).toList(),
+            children: labels
+                .map((lbl) => GestureDetector(
+                      onTap: () => ss(() => sel = lbl),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 140),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: sel == lbl ? DS.indigo : Colors.white10,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                              color: sel == lbl
+                                  ? DS.indigo
+                                  : Colors.white24),
+                        ),
+                        child: Text(lbl,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 12)),
+                      ),
+                    ))
+                .toList(),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(c2),
-              child: Text(l10n.cancel, style: const TextStyle(color: Colors.white38)),
+              child: Text(l10n.cancel,
+                  style: const TextStyle(color: Colors.white38)),
             ),
             FilledButton(
               onPressed: () {
@@ -541,6 +649,23 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
               Positioned.fill(child: _buildAnnotationLayer(context, size)),
               ...widget.signatures.map((s) => _buildSigOverlay(s, size)),
               ...widget.textEdits.map((t) => _buildTextEdit(t, size)),
+              if (_isTextEditMode && widget.currentSourceBytes != null)
+                Positioned.fill(
+                  child: PageTextRunsOverlay(
+                    sourceBytes: widget.currentSourceBytes!,
+                    pageIndex: widget.pageIndex,
+                    pageCount: widget.pageCount,
+                    revision: widget.revision,
+                    displayWidth: size.width,
+                    displayHeight: size.height,
+                    pageWidthPt: _pageWidthPt,
+                    pageHeightPt: _pageHeightPt,
+                    onEditCommitted: widget.onTextEditAdded,
+                    onSourceBytesUpdated: widget.onSourceBytesUpdated,
+                    sampleBackground: _sampleBackground,
+                    ocrSourceProvider: _ocrSource,
+                  ),
+                ),
             ],
           );
         },
@@ -549,19 +674,42 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
   }
 
   Widget _buildTextEdit(TextEditAnnotation textEdit, Size pageSize) {
+    final style = TextStyle(
+      fontSize: textEdit.fontSize,
+      color: textEdit.color,
+      fontWeight: textEdit.isBold ? FontWeight.bold : FontWeight.normal,
+      fontStyle: textEdit.isItalic ? FontStyle.italic : FontStyle.normal,
+      fontFamily: textEdit.fontFamily,
+    );
+
+    if (textEdit.isReplacement) {
+      final r = textEdit.originalNormRect!;
+      final coverColor = Color(textEdit.coverColorValue);
+      return Positioned(
+        left: r.left * pageSize.width,
+        top: r.top * pageSize.height,
+        width: r.width * pageSize.width,
+        height: r.height * pageSize.height,
+        child: Stack(
+          children: [
+            Container(color: coverColor),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(textEdit.text, style: style, maxLines: 1),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Positioned(
       left: textEdit.normPosition.dx * pageSize.width,
       top: textEdit.normPosition.dy * pageSize.height,
-      child: Text(
-        textEdit.text,
-        style: TextStyle(
-          fontSize: textEdit.fontSize,
-          color: textEdit.color,
-          fontWeight: textEdit.isBold ? FontWeight.bold : FontWeight.normal,
-          fontStyle: textEdit.isItalic ? FontStyle.italic : FontStyle.normal,
-          fontFamily: textEdit.fontFamily,
-        ),
-      ),
+      child: Text(textEdit.text, style: style),
     );
   }
 
@@ -645,7 +793,8 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
     final l10n = AppLocalizations.of(context)!;
     Rect? draftNorm;
     if (_dragStart != null && _dragCurrent != null && _isRectTool) {
-      draftNorm = Rect.fromPoints(_norm(_dragStart!, size), _norm(_dragCurrent!, size));
+      draftNorm =
+          Rect.fromPoints(_norm(_dragStart!, size), _norm(_dragCurrent!, size));
     }
     InkStroke? active;
     if (widget.tool == AnnotationTool.ink && _strokePoints.length >= 2) {
@@ -655,12 +804,13 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
         normWidth: widget.inkStrokeWidth,
       );
     }
+    final gesturesEnabled = _annotating && !_isTextEditMode;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onTapDown: (d) => _onTap(d, size),
-      onPanStart: _annotating ? (d) => _onPanStart(d, size) : null,
-      onPanUpdate: _annotating ? (d) => _onPanUpdate(d, size) : null,
-      onPanEnd: _annotating ? (d) => _onPanEnd(d, size) : null,
+      onPanStart: gesturesEnabled ? (d) => _onPanStart(d, size) : null,
+      onPanUpdate: gesturesEnabled ? (d) => _onPanUpdate(d, size) : null,
+      onPanEnd: gesturesEnabled ? (d) => _onPanEnd(d, size) : null,
       child: RepaintBoundary(
         child: CustomPaint(
           size: size,
@@ -673,7 +823,8 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
             redactions: widget.redactions,
             clauseBookmarks: widget.clauseBookmarks,
             draftRect: draftNorm,
-            draftType: widget.tool == AnnotationTool.redaction ? null : _rectType,
+            draftType:
+                widget.tool == AnnotationTool.redaction ? null : _rectType,
             draftColor: _toolColor,
             redactedLabel: l10n.redacted,
           ),
@@ -682,10 +833,9 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
     );
   }
 
-  // ✅ IMPROVED SIGNATURE OVERLAY – larger handles, better placement
   Widget _buildSigOverlay(SignatureOverlay sig, Size pageSize) {
     final isSel = sig.id == _selectedSigId;
-    const handleSize = 32.0; // Larger, easier to tap
+    const handleSize = 32.0;
     return Positioned(
       left: sig.normPosition.dx * pageSize.width,
       top: sig.normPosition.dy * pageSize.height,
@@ -707,13 +857,13 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
               width: sig.normSize.width * pageSize.width,
               height: sig.normSize.height * pageSize.height,
               decoration: BoxDecoration(
-                border: Border.all(color: isSel ? DS.indigo : Colors.transparent, width: 2.0),
+                border: Border.all(
+                    color: isSel ? DS.indigo : Colors.transparent, width: 2.0),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Image.memory(sig.imageBytes, fit: BoxFit.contain),
             ),
             if (isSel) ...[
-              // Delete button (top-left)
               Positioned(
                 top: -handleSize / 2,
                 left: -handleSize / 2,
@@ -724,7 +874,6 @@ class _PdfPageWidgetState extends State<PdfPageWidget> {
                   onTap: () => widget.onSignatureDeleted(sig.id),
                 ),
               ),
-              // Resize handle (bottom-right)
               Positioned(
                 bottom: -handleSize / 2,
                 right: -handleSize / 2,
@@ -777,7 +926,9 @@ class _Handle extends StatelessWidget {
         decoration: BoxDecoration(
           color: color,
           shape: BoxShape.circle,
-          boxShadow: [BoxShadow(color: color.withOpacity(0.4), blurRadius: 8)],
+          boxShadow: [
+            BoxShadow(color: color.withOpacity(0.4), blurRadius: 8)
+          ],
         ),
         child: Icon(icon, size: size * 0.55, color: Colors.white),
       ),

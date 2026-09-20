@@ -30,7 +30,7 @@ class AppLocalizations {
   // ==================== ENGLISH ====================
   static const Map<String, String> _en = {
     // General
-    'appName': 'DocSign',
+    'appName': 'DocScanSign',
     'pro': 'PRO',
     'openPdf': 'Open PDF',
     'home': 'Home',
@@ -95,7 +95,7 @@ class AppLocalizations {
     'savedAt': 'Saved: ',
     'invalidFilePath': 'Invalid file path',
     'loadingPdf': 'Loading PDF...',
-    'aboutDocSign': 'About DocSign',
+    'aboutDocSign': 'About DocScanSign',
     'versionOffline': 'Version 2.0 · 100% Offline',
     'privacyPolicy': 'Privacy Policy',
     'noDataCollected': 'No data collected',
@@ -468,11 +468,15 @@ class AppLocalizations {
     'generating': 'Generating...',
     'single': 'Single',
     'idCard': 'ID Card',
+    'exitConfirmationTitle' : 'Leave PDF Viewer?',
+    'exitConfirmationMessage' : 'You have unsaved annotations. Exit anyway?',
+    'exit' : 'Exit',
+
   };
 
   // ==================== SPANISH ====================
   static const Map<String, String> _es = {
-    'appName': 'DocSign',
+    'appName': 'DocScanSign',
     'pro': 'PRO',
     'openPdf': 'Abrir PDF',
     'home': 'Inicio',
@@ -536,7 +540,7 @@ class AppLocalizations {
     'savedAt': 'Guardado en: ',
     'invalidFilePath': 'Ruta de archivo no válida',
     'loadingPdf': 'Cargando PDF...',
-    'aboutDocSign': 'Acerca de DocSign',
+    'aboutDocSign': 'Acerca de DocScanSign',
     'versionOffline': 'Versión 2.0 · 100% sin conexión',
     'privacyPolicy': 'Política de privacidad',
     'noDataCollected': 'No se recopilan datos',
@@ -891,9 +895,9 @@ class AppLocalizations {
     'idCard': 'Tarjeta de identificación',
   };
 
-  // ==================== HINDI (Placeholder – replace with actual Hindi) ====================
+  // ==================== HINDI ====================
   static const Map<String, String> _hi = {
-  'appName': 'डॉकसाइन',
+  'appName': 'DocScanSign',
   'pro': 'प्रो',
   'openPdf': 'पीडीएफ खोलें',
   'home': 'होम',
@@ -956,7 +960,7 @@ class AppLocalizations {
   'savedAt': 'सहेजा गया: ',
   'invalidFilePath': 'अमान्य फ़ाइल पथ',
   'loadingPdf': 'पीडीएफ लोड हो रही है...',
-  'aboutDocSign': 'डॉकसाइन के बारे में',
+  'aboutDocSign': 'DocScanSign के बारे में',
   'versionOffline': 'संस्करण 2.0 · 100% ऑफलाइन',
   'privacyPolicy': 'गोपनीयता नीति',
   'noDataCollected': 'कोई डेटा एकत्र नहीं किया गया',
@@ -1349,9 +1353,9 @@ class AppLocalizations {
   'closeApp': 'ऐप बंद करें',
 };
 
-  // ==================== TELUGU (Placeholder – replace with actual Telugu) ====================
+  // ==================== TELUGU ====================
   static const Map<String, String> _te = {
-  'appName': 'DocSign',
+  'appName': 'DocScanSign',
   'pro': 'PRO',
   'openPdf': 'PDF తెరవండి',
   'home': 'హోమ్',
@@ -1414,7 +1418,7 @@ class AppLocalizations {
   'savedAt': 'సేవ్ చేయబడింది: ',
   'invalidFilePath': 'చెల్లని ఫైల్ మార్గం',
   'loadingPdf': 'PDF లోడ్ అవుతోంది...',
-  'aboutDocSign': 'DocSign గురించి',
+  'aboutDocSign': 'DocScanSign గురించి',
   'versionOffline': 'వెర్షన్ 2.0 · 100% ఆఫ్‌లైన్',
   'privacyPolicy': 'గోప్యతా విధానం',
   'noDataCollected': 'డేటా సేకరించబడలేదు',
@@ -1835,9 +1839,9 @@ class AppLocalizations {
   'idCard': 'గుర్తింపు కార్డు',
   };
 
-  // ==================== FRENCH (Full proper translations) ====================
+  // ==================== FRENCH ====================
   static const Map<String, String> _fr = {
-    'appName': 'DocSign',
+    'appName': 'DocScanSign',
     'pro': 'PRO',
     'openPdf': 'Ouvrir PDF',
     'home': 'Accueil',
@@ -1900,7 +1904,7 @@ class AppLocalizations {
     'savedAt': 'Enregistré : ',
     'invalidFilePath': 'Chemin de fichier invalide',
     'loadingPdf': 'Chargement du PDF...',
-    'aboutDocSign': 'À propos de DocSign',
+    'aboutDocSign': 'À propos de DocScanSign',
     'versionOffline': 'Version 2.0 · 100% hors ligne',
     'privacyPolicy': 'Politique de confidentialité',
     'noDataCollected': 'Aucune donnée collectée',
@@ -2253,9 +2257,7 @@ class AppLocalizations {
     'idCard': 'Carte d’identité',
   };
 
-  // Getters – all keys (same as before, full list)
-  // (I'm keeping only a few essential getters for brevity; your previous file already had all getters.
-  // Make sure every key has a corresponding getter. The ones above are sufficient for common use.)
+  // Getters – all keys (unchanged)
   String get appName => _strings['appName']!;
   String get pro => _strings['pro']!;
   String get openPdf => _strings['openPdf']!;
@@ -2665,6 +2667,10 @@ class AppLocalizations {
   String get generating => _strings['generating']!;
   String get single => _strings['single']!;
   String get idCard => _strings['idCard']!;
+
+  String get exitConfirmationTitle => 'Leave PDF Viewer?';
+  String get exitConfirmationMessage => 'You have unsaved annotations. Exit anyway?';
+  String get exit => 'Exit';
 }
 
 class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {

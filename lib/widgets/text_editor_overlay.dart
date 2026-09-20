@@ -1,14 +1,31 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import '../widgets/ds.dart';
 
 class TextEditorOverlay extends StatefulWidget {
   final String? initialText;
-  final Function(String text, TextStyle style) onSave;
+
+  /// When true, the overlay opens with the formatting toolbar collapsed
+  /// behind a "Change formatting" link instead of shown up front. Used when
+  /// editing an existing run, where the default expectation is a plain text
+  /// fix that preserves the document's original appearance rather than a
+  /// deliberate restyle. Free-standing text stamps (no "original" appearance
+  /// to preserve) should leave this false.
+  final bool startPlain;
+
+  /// Called with (text, style, formattingChanged). `formattingChanged` is
+  /// true only if the user opened/touched the formatting controls — callers
+  /// use this to decide between an in-place edit that preserves the
+  /// original font exactly, versus a restyled overlay replacement.
+  final void Function(String text, TextStyle style, bool formattingChanged)
+      onSave;
   final VoidCallback onCancel;
 
   const TextEditorOverlay({
     super.key,
     this.initialText,
+    this.startPlain = false,
     required this.onSave,
     required this.onCancel,
   });
@@ -20,13 +37,16 @@ class TextEditorOverlay extends StatefulWidget {
 class _TextEditorOverlayState extends State<TextEditorOverlay> {
   late TextEditingController _controller;
   late FocusNode _focusNode;
-  
+
   double _fontSize = 14;
   Color _textColor = Colors.black;
   bool _isBold = false;
   bool _isItalic = false;
   String _fontFamily = 'Inter';
-  
+
+  late bool _formattingExpanded = !widget.startPlain;
+  bool _formattingTouched = false;
+
   static const _fonts = ['Inter', 'Times New Roman', 'Courier', 'Georgia'];
   static const _fontSizes = [10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 48];
 
@@ -48,106 +68,258 @@ class _TextEditorOverlayState extends State<TextEditorOverlay> {
   }
 
   TextStyle get _currentStyle => TextStyle(
-    fontSize: _fontSize,
-    color: _textColor,
-    fontWeight: _isBold ? FontWeight.bold : FontWeight.normal,
-    fontStyle: _isItalic ? FontStyle.italic : FontStyle.normal,
-    fontFamily: _fontFamily,
-  );
+        fontSize: _fontSize,
+        color: _textColor,
+        fontWeight: _isBold ? FontWeight.bold : FontWeight.normal,
+        fontStyle: _isItalic ? FontStyle.italic : FontStyle.normal,
+        fontFamily: _fontFamily,
+      );
 
- @override
-Widget build(BuildContext context) {
-  return Container(
-    width: 320,
-    decoration: BoxDecoration(
-      color: const Color(0xFF1C1C1E),  // ✅ Dark background like the app
-      borderRadius: BorderRadius.circular(12),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 20, offset: const Offset(0, 8))],
-    ),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Toolbar
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          decoration: BoxDecoration(
-            color: const Color(0xFF2C2C2E),  // ✅ Slightly lighter toolbar
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-          ),
-          // ... rest of toolbar
-        ),
-        // Text input
-        Container(
-          constraints: const BoxConstraints(minHeight: 60, maxHeight: 200),
-          padding: const EdgeInsets.all(12),
-          child: TextField(
-            controller: _controller,
-            focusNode: _focusNode,
-            maxLines: null,
-            style: _currentStyle.copyWith(color: Colors.white),  // ✅ White text on dark
-            decoration: const InputDecoration(
-              border: InputBorder.none,
-              hintText: 'Type your text here...',
-              hintStyle: TextStyle(color: Colors.white38),  // ✅ Visible hint
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
+  @override
+  Widget build(BuildContext context) {
+    // Responsive width: never wider than the viewport minus a margin.
+    // Without this, the 340dp container overflows on 320dp-wide phones
+    // and the math.max() clamp guard in PageTextRunsOverlay can't help —
+    // the dialog still can't fit.
+    final double editorWidth =
+        math.min(340.0, MediaQuery.of(context).size.width - 16);
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        width: editorWidth,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1C1C1E),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.4),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
             ),
-            onSubmitted: (text) {
-              if (text.trim().isNotEmpty) widget.onSave(text.trim(), _currentStyle);
-            },
-          ),
+          ],
         ),
-        // Presets
-        Container(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          child: Row(children: [
-            _buildPreset('Title', () => setState(() { _fontSize = 24; _isBold = true; _isItalic = false; _textColor = DS.indigo; })),
-            const SizedBox(width: 6),
-            _buildPreset('Subtitle', () => setState(() { _fontSize = 16; _isBold = false; _isItalic = true; _textColor = Colors.grey[400]!; })),
-            const SizedBox(width: 6),
-            _buildPreset('Body', () => setState(() { _fontSize = 12; _isBold = false; _isItalic = false; _textColor = Colors.white; })),
-          ]),
-        ),
-        // ✅ NEW: Cancel + Apply buttons
-    Container(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          TextButton(onPressed: widget.onCancel, child: const Text('Cancel')),
-          const SizedBox(width: 8),
-          FilledButton(
-            onPressed: () {
-              if (_controller.text.trim().isNotEmpty) {
-                widget.onSave(_controller.text.trim(), _currentStyle);
-              }
-            },
-            child: const Text('Apply'),
-          ),
-        ],
-      ),
-    ),
-      ],
-    ),
-  );
-}
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ── Toolbar ──────────────────────────────────────────────
+            if (_formattingExpanded)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF2C2C2E),
+                  borderRadius:
+                      BorderRadius.vertical(top: Radius.circular(12)),
+                ),
+                child: Row(
+                  children: [
+                    _buildToolButton(
+                      icon: Icons.format_bold,
+                      isActive: _isBold,
+                      onTap: () => setState(() {
+                        _isBold = !_isBold;
+                        _formattingTouched = true;
+                      }),
+                      tooltip: 'Bold',
+                      color: DS.indigo,
+                    ),
+                    _buildToolButton(
+                      icon: Icons.format_italic,
+                      isActive: _isItalic,
+                      onTap: () => setState(() {
+                        _isItalic = !_isItalic;
+                        _formattingTouched = true;
+                      }),
+                      tooltip: 'Italic',
+                      color: DS.indigo,
+                    ),
+                    const Spacer(),
+                    _buildFontFamilySelector(),
+                    const SizedBox(width: 6),
+                    _buildFontSizeSelector(),
+                    const SizedBox(width: 6),
+                    _buildColorPicker(),
+                  ],
+                ),
+              )
+            else
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF2C2C2E),
+                  borderRadius:
+                      BorderRadius.vertical(top: Radius.circular(12)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.auto_fix_high_rounded,
+                        size: 14, color: Colors.white38),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                      child: Text(
+                        'Keeps the original look',
+                        style:
+                            TextStyle(color: Colors.white38, fontSize: 11),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => setState(() {
+                        _formattingExpanded = true;
+                        _formattingTouched = true;
+                      }),
+                      child: const Text(
+                        'Change formatting',
+                        style: TextStyle(
+                          color: DS.indigo,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
 
+            // ── Text input ────────────────────────────────────────────
+            Container(
+              constraints:
+                  const BoxConstraints(minHeight: 60, maxHeight: 200),
+              padding: const EdgeInsets.all(12),
+              child: TextField(
+                controller: _controller,
+                focusNode: _focusNode,
+                maxLines: null,
+                style: _currentStyle.copyWith(color: Colors.white),
+                decoration: const InputDecoration(
+                  border: InputBorder.none,
+                  hintText: 'Type your text here...',
+                  hintStyle: TextStyle(color: Colors.white38),
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+                onSubmitted: (text) {
+                  if (text.trim().isNotEmpty) {
+                    widget.onSave(text.trim(), _currentStyle, _formattingTouched);
+                  }
+                },
+              ),
+            ),
+
+            // ── Presets ───────────────────────────────────────────────
+            if (_formattingExpanded)
+              Container(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: Row(children: [
+                  _buildPreset(
+                    'Title',
+                    () => setState(() {
+                      _fontSize = 24;
+                      _isBold = true;
+                      _isItalic = false;
+                      _textColor = DS.indigo;
+                      _formattingTouched = true;
+                    }),
+                  ),
+                  const SizedBox(width: 6),
+                  _buildPreset(
+                    'Subtitle',
+                    () => setState(() {
+                      _fontSize = 16;
+                      _isBold = false;
+                      _isItalic = true;
+                      _textColor = Colors.grey;
+                      _formattingTouched = true;
+                    }),
+                  ),
+                  const SizedBox(width: 6),
+                  _buildPreset(
+                    'Body',
+                    () => setState(() {
+                      _fontSize = 12;
+                      _isBold = false;
+                      _isItalic = false;
+                      _textColor = Colors.white;
+                      _formattingTouched = true;
+                    }),
+                  ),
+                ]),
+              ),
+
+            // ── Cancel / Apply ────────────────────────────────────────
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: widget.onCancel,
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(color: Colors.white54),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () {
+                      if (_controller.text.trim().isNotEmpty) {
+                        widget.onSave(
+                          _controller.text.trim(),
+                          _currentStyle,
+                          _formattingTouched,
+                        );
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: DS.indigo,
+                    ),
+                    child: const Text('Apply'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _buildFontSizeSelector() {
     return PopupMenuButton<double>(
       tooltip: 'Font size',
       offset: const Offset(0, 40),
+      color: const Color(0xFF2C2C2E),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(border: Border.all(color: Colors.grey[300]!), borderRadius: BorderRadius.circular(6)),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.white24),
+          borderRadius: BorderRadius.circular(6),
+        ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text('${_fontSize.toInt()}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(
+            '${_fontSize.toInt()}',
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
           const SizedBox(width: 4),
-          Icon(Icons.arrow_drop_down, size: 16, color: Colors.grey[600]),
+          const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white54),
         ]),
       ),
-      onSelected: (size) => setState(() => _fontSize = size),
-      itemBuilder: (_) => _fontSizes.map((s) => PopupMenuItem(value: s.toDouble(), child: Text('$s pt', style: TextStyle(fontSize: s.toDouble())))).toList(),
+      onSelected: (size) => setState(() {
+        _fontSize = size;
+        _formattingTouched = true;
+      }),
+      itemBuilder: (_) => _fontSizes
+          .map((s) => PopupMenuItem(
+                value: s.toDouble(),
+                child: Text('$s pt',
+                    style: TextStyle(fontSize: s.toDouble())),
+              ))
+          .toList(),
     );
   }
 
@@ -155,17 +327,37 @@ Widget build(BuildContext context) {
     return PopupMenuButton<String>(
       tooltip: 'Font',
       offset: const Offset(0, 40),
+      color: const Color(0xFF2C2C2E),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(border: Border.all(color: Colors.grey[300]!), borderRadius: BorderRadius.circular(6)),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.white24),
+          borderRadius: BorderRadius.circular(6),
+        ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text(_fontFamily, style: TextStyle(fontSize: 12, fontFamily: _fontFamily, fontWeight: FontWeight.w600)),
+          Text(
+            _fontFamily,
+            style: TextStyle(
+              fontSize: 12,
+              fontFamily: _fontFamily,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
           const SizedBox(width: 4),
-          Icon(Icons.arrow_drop_down, size: 16, color: Colors.grey[600]),
+          const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white54),
         ]),
       ),
-      onSelected: (font) => setState(() => _fontFamily = font),
-      itemBuilder: (_) => _fonts.map((f) => PopupMenuItem(value: f, child: Text(f, style: TextStyle(fontFamily: f, fontSize: 14)))).toList(),
+      onSelected: (font) => setState(() {
+        _fontFamily = font;
+        _formattingTouched = true;
+      }),
+      itemBuilder: (_) => _fonts
+          .map((f) => PopupMenuItem(
+                value: f,
+                child: Text(f, style: TextStyle(fontFamily: f, fontSize: 14)),
+              ))
+          .toList(),
     );
   }
 
@@ -173,19 +365,45 @@ Widget build(BuildContext context) {
     return PopupMenuButton<Color>(
       tooltip: 'Text color',
       offset: const Offset(0, 40),
+      color: const Color(0xFF2C2C2E),
       child: Container(
-        width: 28, height: 28,
-        decoration: BoxDecoration(color: _textColor, shape: BoxShape.circle, border: Border.all(color: Colors.grey[300]!, width: 2)),
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: _textColor,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white24, width: 2),
+        ),
       ),
-      onSelected: (color) => setState(() => _textColor = color),
+      onSelected: (color) => setState(() {
+        _textColor = color;
+        _formattingTouched = true;
+      }),
       itemBuilder: (_) => [
-        Colors.black, Colors.red.shade700, Colors.blue.shade700, Colors.green.shade700,
-        Colors.orange.shade700, Colors.purple.shade700, DS.indigo, Colors.grey.shade700,
-      ].map((c) => PopupMenuItem(value: c, child: Row(children: [
-        Container(width: 24, height: 24, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
-        const SizedBox(width: 12),
-        Text(_colorName(c), style: const TextStyle(fontSize: 13)),
-      ]))).toList(),
+        Colors.white,
+        Colors.black,
+        Colors.red.shade700,
+        Colors.blue.shade700,
+        Colors.green.shade700,
+        Colors.orange.shade700,
+        Colors.purple.shade700,
+        DS.indigo,
+        Colors.grey.shade700,
+      ]
+          .map((c) => PopupMenuItem(
+                value: c,
+                child: Row(children: [
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration:
+                        BoxDecoration(color: c, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(_colorName(c), style: const TextStyle(fontSize: 13)),
+                ]),
+              ))
+          .toList(),
     );
   }
 
@@ -196,6 +414,7 @@ Widget build(BuildContext context) {
     required String tooltip,
     Color? color,
   }) {
+    final tint = color ?? DS.indigo;
     return Tooltip(
       message: tooltip,
       child: InkWell(
@@ -204,10 +423,14 @@ Widget build(BuildContext context) {
         child: Container(
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(
-            color: isActive ? (color ?? Colors.black).withOpacity(0.1) : Colors.transparent,
+            color: isActive ? tint.withOpacity(0.25) : Colors.transparent,
             borderRadius: BorderRadius.circular(6),
           ),
-          child: Icon(icon, size: 18, color: isActive ? (color ?? Colors.black) : (color ?? Colors.grey[600])),
+          child: Icon(
+            icon,
+            size: 18,
+            color: isActive ? tint : Colors.white54,
+          ),
         ),
       ),
     );
@@ -219,17 +442,25 @@ Widget build(BuildContext context) {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: DS.indigo.withOpacity(0.08),
+          color: DS.indigo.withOpacity(0.15),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: DS.indigo.withOpacity(0.2)),
+          border: Border.all(color: DS.indigo.withOpacity(0.3)),
         ),
-        child: Text(label, style: TextStyle(color: DS.indigo, fontSize: 11, fontWeight: FontWeight.w600)),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: DS.indigo,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }
 
   String _colorName(Color c) {
     if (c == Colors.black) return 'Black';
+    if (c == Colors.white) return 'White';
     if (c == Colors.red.shade700) return 'Red';
     if (c == Colors.blue.shade700) return 'Blue';
     if (c == Colors.green.shade700) return 'Green';

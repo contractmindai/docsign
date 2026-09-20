@@ -3,14 +3,13 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:file_picker/file_picker.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import '../services/pdf_loader.dart';
-import '../services/text_search_service.dart';
 import '../utils/platform_file_service.dart';
 import '../widgets/ds.dart';
 
@@ -33,7 +32,7 @@ class _DocumentCompareScreenState extends State<DocumentCompareScreen> {
   final Map<String, Uint8List?> _cache = {};
   final _scrollA = ScrollController();
   final _scrollB = ScrollController();
-  bool _syncing  = false;
+  bool _syncing = false;
   String? _pathB;
 
   @override
@@ -46,45 +45,72 @@ class _DocumentCompareScreenState extends State<DocumentCompareScreen> {
 
   @override
   void dispose() {
-    _scrollA.dispose(); _scrollB.dispose(); super.dispose();
+    _scrollA.dispose();
+    _scrollB.dispose();
+    super.dispose();
   }
 
-  Future<void> _loadA() async {
-    try {
-      final doc = await PdfLoader.openForViewing(
-          path: widget.pathA,
-          bytes: PlatformFileService.getCached(widget.pathA));
-      if (mounted) setState(() { _docA = doc; _pagesA = doc.pages.length; _loadingA = false; });
-    } catch (_) {
-      if (mounted) setState(() => _loadingA = false);
+Future<void> _loadA() async {
+  try {
+    // First, try to get from cache (web or previously loaded)
+    Uint8List? bytes = PlatformFileService.getCached(widget.pathA);
+    // If not cached, read from disk (mobile) – works on web too (returns null if not cached)
+    if (bytes == null) {
+      bytes = await PlatformFileService.readBytes(widget.pathA);
+    }
+    final doc = await PdfLoader.openForViewing(
+        path: widget.pathA,
+        bytes: bytes);
+    if (mounted) setState(() {
+      _docA = doc;
+      _pagesA = doc.pages.length;
+      _loadingA = false;
+    });
+  } catch (e) {
+    if (mounted) {
+      setState(() => _loadingA = false);
+      _snack('Failed to load document A: $e', err: true);
     }
   }
+}
 
   Future<void> _pickB() async {
-    final r = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-        withData: kIsWeb);
-    if (r == null || r.files.isEmpty || !mounted) return;
+    final XFile? file = await openFile(
+      acceptedTypeGroups: [
+        const XTypeGroup(
+          label: 'PDF',
+          extensions: ['pdf'],
+          uniformTypeIdentifiers: ['com.adobe.pdf'],
+        ),
+      ],
+    );
+    if (file == null || !mounted) return;
 
-    final pf   = r.files.first;
-    // ✅ Safe path access: never use pf.path on web
-    final path = kIsWeb ? pf.name : (pf.path ?? pf.name);
-    if (kIsWeb && pf.bytes != null) PlatformFileService.cache(path, pf.bytes!);
+    final bytes = await file.readAsBytes();
+    if (bytes.isEmpty) {
+      _snack('Selected file is empty', err: true);
+      return;
+    }
 
     setState(() => _loadingB = true);
     try {
       final doc = await PdfLoader.openForViewing(
-          path: path, bytes: PlatformFileService.getCached(path));
+          path: file.path,
+          bytes: bytes);
       if (mounted) {
         setState(() {
-          _pathB = path; _docB = doc;
-          _pagesB = doc.pages.length; _loadingB = false;
+          _pathB = file.path;
+          _docB = doc;
+          _pagesB = doc.pages.length;
+          _loadingB = false;
         });
         _runDiff();
       }
-    } catch (_) {
-      if (mounted) setState(() => _loadingB = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loadingB = false);
+        _snack('Failed to load document B: $e', err: true);
+      }
     }
   }
 
@@ -98,20 +124,26 @@ class _DocumentCompareScreenState extends State<DocumentCompareScreen> {
       final bB = await _renderLow(_docB!, i);
       if (bA != null && bB != null) total += _pixelDiff(bA, bB);
     }
-    if (mounted) setState(() { _diff = total / math.min(pages, 3); _diffDone = true; });
+    if (mounted) setState(() {
+      _diff = total / math.min(pages, 3);
+      _diffDone = true;
+    });
   }
 
-  Future<Uint8List?> _renderLow(PdfDocument doc, int idx) async {
-    try {
-      final page  = doc.pages[idx];
-      const w = 120.0;
-      final h     = w / (page.width / page.height);
-      final img   = await page.render(fullWidth: w, fullHeight: h,
-          backgroundColor: const Color(0xFFFFFFFF));
-      if (img == null) return null;
-      return _pdfImageToPng(img);
-    } catch (_) { return null; }
-  }
+Future<Uint8List?> _renderLow(PdfDocument doc, int idx) async {
+  try {
+    final page = doc.pages[idx];
+    const w = 120.0;
+    final h = w / (page.width / page.height);
+    final img = await page.render(
+      fullWidth: w,
+      fullHeight: h,
+      backgroundColor: Colors.white,  // ✅ Color from dart:ui / material
+    );
+    if (img == null) return null;
+    return _pdfImageToPng(img);
+  } catch (_) { return null; }
+}
 
   double _pixelDiff(Uint8List a, Uint8List b) {
     int diff = 0, count = 0;
@@ -135,6 +167,18 @@ class _DocumentCompareScreenState extends State<DocumentCompareScreen> {
     _syncing = true;
     _scrollA.jumpTo(_scrollB.offset);
     _syncing = false;
+  }
+
+  void _snack(String msg, {bool err = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, style: const TextStyle(color: Colors.white, fontSize: 13)),
+      backgroundColor: err ? DS.red : DS.bgCard2,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      margin: const EdgeInsets.all(12),
+      duration: const Duration(seconds: 3),
+    ));
   }
 
   @override
@@ -164,7 +208,6 @@ class _DocumentCompareScreenState extends State<DocumentCompareScreen> {
         ],
       ),
       body: Column(children: [
-        // Doc B picker
         if (_docB == null)
           Container(
             padding: const EdgeInsets.all(16),
@@ -182,7 +225,6 @@ class _DocumentCompareScreenState extends State<DocumentCompareScreen> {
             ]))
         else
           const Divider(height: 1, color: DS.separator),
-        // Side-by-side view
         Expanded(child: _docA == null
             ? const Center(child: CircularProgressIndicator(color: DS.indigo))
             : _docB == null
@@ -207,20 +249,17 @@ class _DocumentCompareScreenState extends State<DocumentCompareScreen> {
   }
 }
 
-// ✅ Convert PdfImage (pdfrx 1.3.5) to PNG bytes
 Future<Uint8List?> _pdfImageToPng(PdfImage img) async {
   try {
-    final comp = Completer<ui.Image>();
+    final completer = Completer<ui.Image>();
     ui.decodeImageFromPixels(img.pixels, img.width, img.height,
-        ui.PixelFormat.bgra8888, (i) => comp.complete(i));
-    final uiImg = await comp.future;
-    final bd    = await uiImg.toByteData(format: ui.ImageByteFormat.png);
+        ui.PixelFormat.bgra8888, completer.complete);
+    final uiImg = await completer.future;
+    final byteData = await uiImg.toByteData(format: ui.ImageByteFormat.png);
     uiImg.dispose();
-    return bd?.buffer.asUint8List();
+    return byteData?.buffer.asUint8List();
   } catch (_) { return null; }
 }
-
-// ── PDF column widget ─────────────────────────────────────────────────────────
 
 class _PdfColumn extends StatelessWidget {
   final PdfDocument doc;
@@ -258,8 +297,6 @@ class _PdfColumn extends StatelessWidget {
   }
 }
 
-// ── Page tile ─────────────────────────────────────────────────────────────────
-
 class _PageTile extends StatefulWidget {
   final PdfDocument doc;
   final int pageIndex;
@@ -275,25 +312,27 @@ class _PageTileState extends State<_PageTile> {
   @override
   void initState() { super.initState(); _render(); }
 
-  Future<void> _render() async {
-    final key = '${widget.side}_${widget.pageIndex}';
-    if (widget.cache.containsKey(key)) { if (mounted) setState(() {}); return; }
-    try {
-      final page  = widget.doc.pages[widget.pageIndex];
-      // ✅ Use context width inside build — use a fixed width here
-      const renderW = 300.0;
-      final renderH = renderW / (page.width / page.height);
-      final img     = await page.render(fullWidth: renderW, fullHeight: renderH,
-          backgroundColor: const Color(0xFFFFFFFF));
-      if (img == null) return;
-      final bytes = await _pdfImageToPng(img);
-      if (mounted) { widget.cache[key] = bytes; setState(() {}); }
-    } catch (_) {}
-  }
+Future<void> _render() async {
+  final key = '${widget.side}_${widget.pageIndex}';
+  if (widget.cache.containsKey(key)) { if (mounted) setState(() {}); return; }
+  try {
+    final page = widget.doc.pages[widget.pageIndex];
+    const renderW = 300.0;
+    final renderH = renderW / (page.width / page.height);
+    final img = await page.render(
+      fullWidth: renderW,
+      fullHeight: renderH,
+      backgroundColor: Colors.white,  // ✅ fixed
+    );
+    if (img == null) return;
+    final bytes = await _pdfImageToPng(img);
+    if (mounted) { widget.cache[key] = bytes; setState(() {}); }
+  } catch (_) {}
+}
 
   @override
   Widget build(BuildContext context) {
-    final key   = '${widget.side}_${widget.pageIndex}';
+    final key = '${widget.side}_${widget.pageIndex}';
     final bytes = widget.cache[key];
     return Container(
       margin: const EdgeInsets.only(bottom: 8),

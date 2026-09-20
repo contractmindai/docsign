@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.contractmind.docsign">   <!-- Use your actual package name -->
+    package="com.contractmind.docsign">   <!-- Kept unchanged -->
 
     <!-- Permissions -->
 
@@ -26,7 +26,7 @@
     </queries>
 
     <application
-        android:label="DocSign"
+        android:label="DocScanSign"   <!-- Changed -->
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -50,19 +50,19 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
-            <intent-filter android:label="Open with DocSign">
+            <intent-filter android:label="Open with DocScanSign">   <!-- Changed -->
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:mimeType="application/pdf"/>
             </intent-filter>
 
-            <intent-filter android:label="Open with DocSign">
+            <intent-filter android:label="Open with DocScanSign">   <!-- Changed -->
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="application/pdf" android:scheme="file"/>
             </intent-filter>
-            <intent-filter android:label="Open with DocSign">
+            <intent-filter android:label="Open with DocScanSign">   <!-- Changed -->
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="application/pdf" android:scheme="content"/>
